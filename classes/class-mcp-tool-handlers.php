@@ -75,7 +75,71 @@ class McpToolHandlers {
 				'undo_ttl_hours' => (int) ( McpSupport::UNDO_TTL_SECONDS / 3600 ),
 				'oauth'          => true,
 				'seo_providers'  => McpSeo::active_providers(),
+				'discovery'      => McpSupport::discovery_urls(),
+				'meta_allowlist' => McpSupport::meta_allowlist(),
+				'has_agents_md'  => (bool) McpSupport::agents_md(),
+				'has_changelog_md'=> (bool) McpSupport::changelog_md(),
+				'docs_write_allowed' => McpSupport::docs_write_allowed(),
 			),
+		);
+	}
+
+
+	public function get_site_docs( $args = array() ) {
+		$which = isset( $args['doc'] ) ? sanitize_key( $args['doc'] ) : 'both';
+		$agents = McpSupport::agents_md();
+		$change = McpSupport::changelog_md();
+		$out = array(
+			'docs_write_allowed' => McpSupport::docs_write_allowed(),
+			'resources'          => array( 'site://agents', 'site://changelog' ),
+		);
+		if ( in_array( $which, array( 'agents', 'both', '' ), true ) ) {
+			$out['agents_md'] = $agents;
+			$out['agents_chars'] = strlen( $agents );
+		}
+		if ( in_array( $which, array( 'changelog', 'both', '' ), true ) ) {
+			$out['changelog_md'] = $change;
+			$out['changelog_chars'] = strlen( $change );
+		}
+		return $out;
+	}
+
+	public function update_site_docs( $args ) {
+		if ( ! McpSupport::docs_write_allowed() ) {
+			throw new \Exception( 'Agent docs writes are disabled. Enable "Allow agent docs writes" in Settings → MT MCP.' );
+		}
+		if ( ! current_user_can( 'manage_options' ) ) {
+			throw new \Exception( 'manage_options required to update site docs.' );
+		}
+		$dry = ! empty( $args['dry_run'] );
+		$changed = array();
+		if ( array_key_exists( 'agents_md', $args ) ) {
+			$val = (string) $args['agents_md'];
+			if ( strlen( $val ) > 20000 ) {
+				throw new \Exception( 'agents_md max 20000 characters.' );
+			}
+			if ( ! $dry ) {
+				update_option( McpSupport::OPTION_AGENTS_MD, $val, false );
+			}
+			$changed['agents_md'] = strlen( $val );
+		}
+		if ( array_key_exists( 'changelog_md', $args ) ) {
+			$val = (string) $args['changelog_md'];
+			if ( strlen( $val ) > 20000 ) {
+				throw new \Exception( 'changelog_md max 20000 characters.' );
+			}
+			if ( ! $dry ) {
+				update_option( McpSupport::OPTION_CHANGELOG_MD, $val, false );
+			}
+			$changed['changelog_md'] = strlen( $val );
+		}
+		if ( empty( $changed ) ) {
+			throw new \Exception( 'Provide agents_md and/or changelog_md.' );
+		}
+		return array(
+			'dry_run' => $dry,
+			'updated' => $changed,
+			'hint'    => 'Full docs via get_site_docs or resources site://agents / site://changelog.',
 		);
 	}
 
@@ -821,6 +885,7 @@ class McpToolHandlers {
 					$changed[] = 'acf';
 				} elseif ( 'meta' === $scope ) {
 					foreach ( $hit['keys'] as $key ) {
+						McpSupport::assert_meta_key_allowed( $key );
 						$val = get_post_meta( $post_id, $key, true );
 						if ( is_string( $val ) ) {
 							update_post_meta( $post_id, $key, str_replace( $find, $replace, $val ) );
@@ -1041,6 +1106,7 @@ class McpToolHandlers {
 
 		if ( ! empty( $args['meta'] ) && is_array( $args['meta'] ) ) {
 			foreach ( $args['meta'] as $key => $value ) {
+				McpSupport::assert_meta_key_allowed( $key );
 				update_post_meta( $post_id, $key, $value );
 			}
 			$changed[] = 'meta';
@@ -3915,9 +3981,12 @@ MD;
 		$https = ( 0 === strpos( $base, 'https://' ) );
 		$checks[] = array( 'key' => 'https', 'ok' => $https, 'detail' => $https ? 'Site URL is https' : 'Site URL is not https' );
 
+		$discovery = McpSupport::discovery_urls();
 		$well_known = array(
-			'oauth_protected_resource' => home_url( '/.well-known/oauth-protected-resource' ),
-			'oauth_authorization_server' => home_url( '/.well-known/oauth-authorization-server' ),
+			'oauth_protected_resource' => $discovery['well_known_protected_resource'],
+			'oauth_authorization_server' => $discovery['well_known_authorization_server'],
+			'alternate_protected_resource' => $discovery['alternate_protected_resource'],
+			'alternate_authorization_server' => $discovery['alternate_authorization_server'],
 		);
 		foreach ( $well_known as $label => $url ) {
 			$res = wp_remote_get( $url, array( 'timeout' => 8, 'redirection' => 0, 'sslverify' => $ssl ) );

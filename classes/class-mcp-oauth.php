@@ -8,6 +8,9 @@ namespace MT\Mcp;
  * Endpoints:
  *   GET  /.well-known/oauth-protected-resource
  *   GET  /.well-known/oauth-authorization-server
+ *   GET  /mt-mcp/oauth/protected-resource   (alternate when hosts block /.well-known/)
+ *   GET  /mt-mcp/oauth/authorization-server
+ *   GET  /wp-json/mt-mcp/v1/oauth/*         (REST alternate)
  *   POST /mt-mcp/oauth/register          (RFC 7591 dynamic client registration)
  *   GET  /mt-mcp/oauth/authorize         (authorization code + PKCE)
  *   POST /mt-mcp/oauth/authorize         (consent submit)
@@ -60,6 +63,14 @@ class McpOAuth {
 			$this->handle_action( 'authorize' );
 			exit;
 		}
+		if ( preg_match( '#/mt-mcp/oauth/protected-resource$#', $path ) ) {
+			$this->handle_action( 'prm' );
+			exit;
+		}
+		if ( preg_match( '#/mt-mcp/oauth/authorization-server$#', $path ) ) {
+			$this->handle_action( 'as_meta' );
+			exit;
+		}
 		if ( preg_match( '#/mt-mcp/oauth/(register|authorize|token|revoke)$#', $path, $m ) ) {
 			$this->handle_action( $m[1] );
 			exit;
@@ -71,6 +82,8 @@ class McpOAuth {
 		add_rewrite_rule( '^\\.well-known/oauth-authorization-server(?:/mt-mcp)?/?$', 'index.php?mt_mcp_oauth=as_meta', 'top' );
 		add_rewrite_rule( '^authorize/?$', 'index.php?mt_mcp_oauth=authorize', 'top' );
 		add_rewrite_rule( '^oauth/authorize/?$', 'index.php?mt_mcp_oauth=authorize', 'top' );
+		add_rewrite_rule( '^mt-mcp/oauth/protected-resource/?$', 'index.php?mt_mcp_oauth=prm', 'top' );
+		add_rewrite_rule( '^mt-mcp/oauth/authorization-server/?$', 'index.php?mt_mcp_oauth=as_meta', 'top' );
 		add_rewrite_rule( '^mt-mcp/oauth/register/?$', 'index.php?mt_mcp_oauth=register', 'top' );
 		add_rewrite_rule( '^mt-mcp/oauth/authorize/?$', 'index.php?mt_mcp_oauth=authorize', 'top' );
 		add_rewrite_rule( '^mt-mcp/oauth/token/?$', 'index.php?mt_mcp_oauth=token', 'top' );

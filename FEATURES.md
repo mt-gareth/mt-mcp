@@ -83,6 +83,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] `sitemap_diff` soft-404 body checks + sitemap source; SVG upload sanitize (`allow_svg` + enshrined/svg-sanitize)
 
+### Shipped in 1.3.11
+
+- [x] Meta-key allowlist; alternate OAuth discovery paths; AGENTS.md / CHANGELOG.md site docs
+
 ---
 
 ## Capability map (what works today)
@@ -218,18 +222,18 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **Live change toasts** in wp-admin while the agent works
 - [ ] **HITL approval queue** for destructive tools (beyond Force draft)
 - [ ] **Write-and-confirm outcome enum** on all mutations
-- [ ] **Site Context AGENTS.md + CHANGELOG.md** for chat-only agents (complements repo skill)
+- [x] **Site Context AGENTS.md + CHANGELOG.md** — Settings + `get_site_docs` / `site://agents` / `site://changelog`
 - [x] **Prompts / resources** — Recipes tab + MCP `seo_pass` / `launch_prep` / `acf_gap_check` / `content_inventory` / `session_plan`
 - [ ] **Richer MCP resources** — `acf://`, `menu://`, `media://missing-alt`
 
 ### Ops & hosting
 
 - [x] **`MT_MCP_PUBLIC_BASE`** for tunnel/local OAuth advertise URL
-- [ ] **Alternate discovery URL** when hosts block `/.well-known/`
+- [x] **Alternate discovery URL** — `/mt-mcp/oauth/*` + REST `mt-mcp/v1/oauth/*` (doctor probes both)
 - [ ] **Output / Auth-header / Sucuri diagnostics** folded into Doctor
 - [x] **Plugin / core update sessions** — list → confirm → one-at-a-time + zip rollback + smoke checks (Allow MCP updates)
 - [x] **Allowlisted cache flush** — `flush_caches` (object_cache / rewrites / Rocket / LiteSpeed / W3TC / Autoptimize / Elementor)
-- [ ] **Meta-key allowlist** for any generic meta writes
+- [x] **Meta-key allowlist** — Settings + gates `meta` bucket / find_replace meta (empty = refuse)
 - [ ] **High-risk second lock** — permanent delete / redirect wipe need extra toggle
 - [ ] **Alert emails without payload** on denials/errors
 - [ ] **Tool profiles or discover/run gateway** if `tools/list` gets heavy

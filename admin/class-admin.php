@@ -113,6 +113,32 @@ class Admin {
 				update_option( McpSupport::OPTION_SITE_BRIEF, $val, false );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
+			case 'meta_allowlist':
+				$val = sanitize_textarea_field( (string) $raw );
+				update_option( McpSupport::OPTION_META_ALLOWLIST, $val, false );
+				wp_send_json_success( array( 'key' => $key, 'value' => $val, 'parsed' => McpSupport::meta_allowlist() ) );
+
+			case 'agents_md':
+				$val = (string) $raw;
+				if ( strlen( $val ) > 20000 ) {
+					wp_send_json_error( array( 'message' => 'AGENTS.md max 20000 characters.' ), 400 );
+				}
+				update_option( McpSupport::OPTION_AGENTS_MD, $val, false );
+				wp_send_json_success( array( 'key' => $key, 'chars' => strlen( $val ) ) );
+
+			case 'changelog_md':
+				$val = (string) $raw;
+				if ( strlen( $val ) > 20000 ) {
+					wp_send_json_error( array( 'message' => 'CHANGELOG.md max 20000 characters.' ), 400 );
+				}
+				update_option( McpSupport::OPTION_CHANGELOG_MD, $val, false );
+				wp_send_json_success( array( 'key' => $key, 'chars' => strlen( $val ) ) );
+
+			case 'allow_docs_write':
+				$val = ! empty( $raw ) && '0' !== (string) $raw && 'false' !== (string) $raw;
+				update_option( McpSupport::OPTION_ALLOW_DOCS_WRITE, $val ? '1' : '' );
+				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
+
 			case 'dcr_extra_hosts':
 				$val = sanitize_text_field( (string) $raw );
 				update_option( McpSupport::OPTION_DCR_HOSTS, $val, false );
@@ -580,6 +606,42 @@ class Admin {
 							  placeholder="e.g. Never publish without client approval. Keep phone number in Site Options."><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_SITE_BRIEF, '' ) ); ?></textarea>
 				</label>
 				<p class="mt-mcp-help">Injected into MCP initialize instructions. Max 2000 characters.</p>
+
+				<label class="mt-mcp-field">
+					<span>Meta-key allowlist</span>
+					<textarea class="large-text mt-mcp-autosave"
+							  rows="2"
+							  data-key="meta_allowlist"
+							  placeholder="subtitle, hero_kicker"><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_META_ALLOWLIST, '' ) ); ?></textarea>
+				</label>
+				<p class="mt-mcp-help">Comma/space-separated keys allowed for the generic <code>meta</code> bucket on create/update_post and find_replace meta scope. Empty = refuse all generic meta writes (prefer ACF/Yoast). Never needed for ACF field keys.</p>
+
+				<label class="mt-mcp-field">
+					<span>AGENTS.md (site context for chat agents)</span>
+					<textarea class="large-text mt-mcp-autosave"
+							  rows="6"
+							  data-key="agents_md"
+							  placeholder="# Propio&#10;- Prefer drafts&#10;- Main flexible layouts live on page…"><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_AGENTS_MD, '' ) ); ?></textarea>
+				</label>
+				<p class="mt-mcp-help">Truncated into initialize instructions; full via <code>get_site_docs</code> / <code>site://agents</code>. Complements Site Brief (Brief wins on conflict).</p>
+
+				<label class="mt-mcp-field">
+					<span>CHANGELOG.md</span>
+					<textarea class="large-text mt-mcp-autosave"
+							  rows="4"
+							  data-key="changelog_md"
+							  placeholder="## 2026-10-29&#10;- Updated careers hero copy"><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_CHANGELOG_MD, '' ) ); ?></textarea>
+				</label>
+				<p class="mt-mcp-help">Ops/content log for agents. Resource <code>site://changelog</code>.</p>
+
+				<label class="mt-mcp-check">
+					<input type="checkbox"
+						   class="mt-mcp-autosave"
+						   data-key="allow_docs_write"
+						   <?php checked( get_option( McpSupport::OPTION_ALLOW_DOCS_WRITE ) ); ?> />
+					<span>Allow agent docs writes</span>
+				</label>
+				<p class="mt-mcp-help">Off by default. When on, agents with manage_options may call <code>update_site_docs</code>.</p>
 
 				<label class="mt-mcp-field">
 					<span>DCR extra redirect hosts</span>

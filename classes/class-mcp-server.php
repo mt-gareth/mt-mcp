@@ -418,6 +418,12 @@ class McpServer {
 		$writes = get_option( self::OPTION_ALLOW_WRITE ) ? 'enabled' : 'disabled';
 		$brief = McpSupport::site_brief();
 		$brief_block = $brief ? "Site Brief (owner rules — do not ignore):\n{$brief}\n\n" : '';
+		$agents = McpSupport::agents_md();
+		$agents_block = '';
+		if ( $agents ) {
+			$trunc = strlen( $agents ) > 1500 ? ( substr( $agents, 0, 1500 ) . "\n…[truncated — read site://agents or get_site_docs]" ) : $agents;
+			$agents_block = "AGENTS.md (site context — follow unless Site Brief conflicts):\n{$trunc}\n\n";
+		}
 		if ( McpSupport::writes_paused() ) {
 			$writes = 'PAUSED';
 		}
@@ -446,10 +452,10 @@ Staging → live page moves: export_post on source (embed_media if target cannot
 
 Writes are currently {$writes}. Use get_site_health for install health; list_revisions / restore_revision after bad edits.
 
-{$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
+{$agents_block}{$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
 
 Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep, session_plan) or copy Recipes from Settings → MT MCP → Recipes.
-Use resources site://context, site://sitemap, and acf://schema/{post_type} for quick context pulls.
+Use resources site://context, site://agents, site://changelog, site://sitemap, and acf://schema/{post_type} for quick context pulls.
 TXT;
 	}
 
@@ -467,6 +473,28 @@ TXT;
 					'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 				),
 				array( 'readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false )
+			),
+			array(
+				'name'        => 'get_site_docs',
+				'description' => 'Read AGENTS.md / CHANGELOG.md site context docs for chat-only agents. doc: agents|changelog|both.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'doc' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'update_site_docs',
+				'description' => 'Update AGENTS.md / CHANGELOG.md when Allow agent docs writes is on. manage_options. Supports dry_run.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'agents_md'     => array( 'type' => 'string' ),
+						'changelog_md'  => array( 'type' => 'string' ),
+						'dry_run'       => array( 'type' => 'boolean' ),
+					),
+				),
 			),
 			array(
 				'name'        => 'flush_caches',
@@ -1817,6 +1845,8 @@ TXT;
 	private function handler_method( $name ) {
 		$map = array(
 			'get_site_context'      => 'get_site_context',
+			'get_site_docs'         => 'get_site_docs',
+			'update_site_docs'      => 'update_site_docs',
 			'list_post_types'       => 'list_post_types',
 			'inventory_post_types'  => 'inventory_post_types',
 			'permalink_clash_report'=> 'permalink_clash_report',
@@ -1938,6 +1968,18 @@ TXT;
 				'description' => 'Lightweight list of published public posts/pages (id, type, title, url).',
 				'mimeType'    => 'application/json',
 			),
+			array(
+				'uri'         => 'site://agents',
+				'name'        => 'AGENTS.md',
+				'description' => 'Site-specific agent instructions (Settings → MT MCP).',
+				'mimeType'    => 'text/markdown',
+			),
+			array(
+				'uri'         => 'site://changelog',
+				'name'        => 'CHANGELOG.md',
+				'description' => 'Site content/ops changelog for agents.',
+				'mimeType'    => 'text/markdown',
+			),
 		);
 
 		foreach ( get_post_types( array( 'public' => true ), 'names' ) as $type ) {
@@ -1954,10 +1996,17 @@ TXT;
 
 	private function rpc_resources_read( $params ) {
 		$uri = isset( $params['uri'] ) ? $params['uri'] : '';
+		$mime = 'application/json';
 		if ( 'site://context' === $uri ) {
 			$text = wp_json_encode( $this->handlers->get_site_context() );
 		} elseif ( 'site://sitemap' === $uri ) {
 			$text = wp_json_encode( $this->build_sitemap_resource() );
+		} elseif ( 'site://agents' === $uri ) {
+			$text = McpSupport::agents_md();
+			$mime = 'text/markdown';
+		} elseif ( 'site://changelog' === $uri ) {
+			$text = McpSupport::changelog_md();
+			$mime = 'text/markdown';
 		} elseif ( 0 === strpos( $uri, 'acf://schema/' ) ) {
 			$type = sanitize_key( substr( $uri, strlen( 'acf://schema/' ) ) );
 			$text = wp_json_encode( $this->handlers->get_acf_schema( array( 'post_type' => $type ) ) );
@@ -1969,7 +2018,7 @@ TXT;
 			'contents' => array(
 				array(
 					'uri'      => $uri,
-					'mimeType' => 'application/json',
+					'mimeType' => $mime,
 					'text'     => $text,
 				),
 			),

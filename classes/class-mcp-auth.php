@@ -157,6 +157,7 @@ class McpAuth {
 			'check_links'              => 'edit_posts',
 			'get_site_health'          => 'manage_options',
 			'flush_caches'            => 'manage_options',
+			'update_site_docs'         => 'manage_options',
 			'notify_write_batch'       => 'edit_posts',
 			'list_updates'             => 'update_plugins',
 			'start_update_session'     => 'update_plugins',

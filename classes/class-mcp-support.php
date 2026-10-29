@@ -18,6 +18,10 @@ class McpSupport {
 	const OPTION_PAUSE_WRITES = 'mt_mcp_pause_writes';
 	const OPTION_FORCE_DRAFT  = 'mt_mcp_force_draft';
 	const OPTION_SITE_BRIEF   = 'mt_mcp_site_brief';
+	const OPTION_META_ALLOWLIST = 'mt_mcp_meta_allowlist';
+	const OPTION_AGENTS_MD    = 'mt_mcp_agents_md';
+	const OPTION_CHANGELOG_MD = 'mt_mcp_changelog_md';
+	const OPTION_ALLOW_DOCS_WRITE = 'mt_mcp_allow_docs_write';
 	const OPTION_CONNECTIONS = 'mt_mcp_connections';
 	const OPTION_DCR_HOSTS   = 'mt_mcp_dcr_extra_hosts';
 	const OPTION_OP_RECEIPTS = 'mt_mcp_op_receipts';
@@ -109,6 +113,7 @@ class McpSupport {
 		'finish_update_session',
 		'confirm_update_ok',
 		'flush_caches',
+		'update_site_docs',
 	);
 
 	/**
@@ -156,6 +161,8 @@ class McpSupport {
 	public static function group_for_tool( $tool ) {
 		$map = array(
 			'get_site_context'       => 'content',
+			'get_site_docs'          => 'content',
+			'update_site_docs'       => 'content',
 			'list_post_types'        => 'content',
 			'inventory_post_types'   => 'content',
 			'permalink_clash_report' => 'content',
@@ -967,6 +974,90 @@ class McpSupport {
 	 * @return string Clean SVG.
 	 * @throws \Exception When sanitizer missing or SVG rejected.
 	 */
+
+	/**
+	 * Allowed post meta keys for generic meta writes (update_post meta bucket / find_replace meta).
+	 * Empty allowlist = refuse all generic meta writes.
+	 *
+	 * @return string[]
+	 */
+	public static function meta_allowlist() {
+		$raw = (string) get_option( self::OPTION_META_ALLOWLIST, '' );
+		$keys = array_filter( array_map( 'trim', preg_split( '/[\s,]+/', $raw ) ) );
+		$out = array();
+		foreach ( $keys as $k ) {
+			if ( ! preg_match( '/^[a-zA-Z0-9_\-]{1,191}$/', $k ) ) {
+				continue;
+			}
+			if ( ! in_array( $k, $out, true ) ) {
+				$out[] = $k;
+			}
+		}
+		/**
+		 * Filter MCP post-meta allowlist.
+		 *
+		 * @param string[] $out Keys.
+		 */
+		return array_values( apply_filters( 'mt_mcp_meta_allowlist', $out ) );
+	}
+
+	/**
+	 * @param string $key Meta key.
+	 * @throws \Exception When not allowlisted / protected.
+	 */
+	public static function assert_meta_key_allowed( $key ) {
+		$key = (string) $key;
+		if ( '' === $key ) {
+			throw new \Exception( 'Empty meta key.' );
+		}
+		if ( in_array( $key, self::PROTECTED_OPTION_KEYS, true ) ) {
+			throw new \Exception( 'Meta key is protected: ' . $key );
+		}
+		// Block auth/session-ish and MCP internals unless explicitly listed.
+		$blocked_prefixes = array( '_transient', '_site_transient', 'mt_mcp_', 'oauth_', 'wordpress_', 'session_tokens' );
+		foreach ( $blocked_prefixes as $prefix ) {
+			if ( 0 === strpos( $key, $prefix ) && ! in_array( $key, self::meta_allowlist(), true ) ) {
+				throw new \Exception( 'Meta key blocked by prefix policy: ' . $key );
+			}
+		}
+		$allow = self::meta_allowlist();
+		if ( empty( $allow ) ) {
+			throw new \Exception( 'Generic meta writes are disabled. Add keys under Settings → MT MCP → Meta-key allowlist (or use ACF/yoast buckets).' );
+		}
+		if ( ! in_array( $key, $allow, true ) ) {
+			throw new \Exception( 'Meta key "' . $key . '" is not on the MCP allowlist.' );
+		}
+	}
+
+	public static function agents_md() {
+		return (string) get_option( self::OPTION_AGENTS_MD, '' );
+	}
+
+	public static function changelog_md() {
+		return (string) get_option( self::OPTION_CHANGELOG_MD, '' );
+	}
+
+	public static function docs_write_allowed() {
+		return (bool) get_option( self::OPTION_ALLOW_DOCS_WRITE, '' );
+	}
+
+	/**
+	 * Discovery URLs — primary .well-known plus alternates when hosts block dots.
+	 *
+	 * @return array
+	 */
+	public static function discovery_urls() {
+		return array(
+			'well_known_protected_resource'     => self::publicize_url( home_url( '/.well-known/oauth-protected-resource' ) ),
+			'well_known_authorization_server'   => self::publicize_url( home_url( '/.well-known/oauth-authorization-server' ) ),
+			'alternate_protected_resource'      => self::publicize_url( rest_url( 'mt-mcp/v1/oauth/protected-resource' ) ),
+			'alternate_authorization_server'    => self::publicize_url( rest_url( 'mt-mcp/v1/oauth/authorization-server' ) ),
+			'rewrite_protected_resource'        => self::public_url( '/mt-mcp/oauth/protected-resource' ),
+			'rewrite_authorization_server'      => self::public_url( '/mt-mcp/oauth/authorization-server' ),
+			'note' => 'Prefer .well-known. If a host/WAF blocks /.well-known/, use alternate_* (REST) or rewrite_* paths — WWW-Authenticate already points at the REST PRM.',
+		);
+	}
+
 	public static function sanitize_svg_bytes( $svg ) {
 		$svg = (string) $svg;
 		if ( '' === trim( $svg ) ) {
