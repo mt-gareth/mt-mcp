@@ -117,6 +117,7 @@ class McpAuth {
 			'update_media'             => 'upload_files',
 			'upload_media'             => 'upload_files',
 			'bulk_fix_media_alt'    => 'upload_files',
+			'replace_attachment_file'  => 'upload_files',
 			'schedule_post'            => 'edit_posts',
 			'update_options'           => 'manage_options',
 			'update_options_page'      => 'manage_options',
@@ -150,6 +151,8 @@ class McpAuth {
 			'list_changes'             => 'edit_posts',
 			'get_change'               => 'edit_posts',
 			'undo_change'              => 'edit_posts',
+			'diff_public_html'         => 'edit_posts',
+			'check_links'              => 'edit_posts',
 			'get_site_health'          => 'manage_options',
 			'notify_write_batch'       => 'edit_posts',
 		);

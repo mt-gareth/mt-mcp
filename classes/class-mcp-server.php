@@ -479,6 +479,63 @@ TXT;
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 			),
 			array(
+				'name'        => 'list_theme_templates',
+				'description' => 'List theme page templates (file => label) for page and hierarchical CPTs.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array( 'post_type' => array( 'type' => 'string' ) ),
+				),
+			),
+			array(
+				'name'        => 'plugin_capability_matrix',
+				'description' => 'Which SEO/redirect/ACF/media tool packs are unlocked (plugin active ∩ tool group enabled).',
+				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
+			),
+			array(
+				'name'        => 'diff_public_html',
+				'description' => 'Fetch the public (or preview) HTML for a post and verify title/h1/meta/expect_contains after edits.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'              => array( 'type' => 'integer' ),
+						'url'             => array( 'type' => 'string' ),
+						'preview_url'     => array( 'type' => 'string' ),
+						'expect_contains' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'check_links',
+				'description' => 'Extract and HTTP-check links from a post or capped post_type sample (max 50 URLs).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'         => array( 'type' => 'integer' ),
+						'url'        => array( 'type' => 'string' ),
+						'post_type'  => array( 'type' => 'string' ),
+						'status'     => array( 'type' => 'string' ),
+						'limit'      => array( 'type' => 'integer' ),
+						'max_links'  => array( 'type' => 'integer' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'replace_attachment_file',
+				'description' => 'Replace an attachment’s file bytes while keeping the same ID (ACF image fields stay valid). data_base64 or source_url (SSRF-safe).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'           => array( 'type' => 'integer' ),
+						'data_base64'  => array( 'type' => 'string' ),
+						'source_url'   => array( 'type' => 'string' ),
+						'filename'     => array( 'type' => 'string' ),
+						'alt'          => array( 'type' => 'string' ),
+						'dry_run'      => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'id' ),
+				),
+			),
+			array(
 				'name'        => 'list_needs_review',
 				'description' => 'List posts marked _mt_mcp_needs_review (force-draft inbox).',
 				'inputSchema' => array(
@@ -1573,6 +1630,11 @@ TXT;
 			'list_changes'          => 'list_changes',
 			'get_change'            => 'get_change',
 			'undo_change'           => 'undo_change',
+			'list_theme_templates'  => 'list_theme_templates',
+			'plugin_capability_matrix' => 'plugin_capability_matrix',
+			'diff_public_html'      => 'diff_public_html',
+			'check_links'           => 'check_links',
+			'replace_attachment_file' => 'replace_attachment_file',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',
 			'list_acf_options_pages'=> 'list_acf_options_pages',

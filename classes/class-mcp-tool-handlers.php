@@ -3053,7 +3053,7 @@ MD;
 			'items'             => $items,
 			'limit'             => $limit,
 			'truncated'         => $missing_q->found_posts > count( $missing_ids ),
-			'hint'              => 'Pass missing_alt_ids into bulk_fill_media_alt or update_media per id.',
+			'hint'              => 'Pass missing_alt_ids into bulk_fix_media_alt or update_media per id.',
 		);
 	}
 
@@ -4113,6 +4113,436 @@ MD;
 			return array( 'deleted' => $name, 'connections' => array_values( $connections ) );
 		}
 		throw new \Exception( 'action must be list, upsert, or delete.' );
+	}
+
+	public function list_theme_templates( $args = array() ) {
+		$theme = wp_get_theme();
+		$types = array();
+		if ( ! empty( $args['post_type'] ) ) {
+			$types[] = sanitize_key( $args['post_type'] );
+		} else {
+			$types[] = 'page';
+			foreach ( get_post_types( array( 'public' => true, 'hierarchical' => true ), 'names' ) as $t ) {
+				if ( 'page' !== $t ) {
+					$types[] = $t;
+				}
+			}
+		}
+		$out = array();
+		foreach ( array_unique( $types ) as $type ) {
+			if ( ! post_type_exists( $type ) ) {
+				continue;
+			}
+			$map = $theme->get_page_templates( null, $type );
+			$items = array();
+			foreach ( $map as $file => $label ) {
+				$items[] = array(
+					'file'  => $file,
+					'label' => $label,
+				);
+			}
+			$out[ $type ] = $items;
+		}
+		return array(
+			'theme'     => $theme->get( 'Name' ),
+			'stylesheet'=> $theme->get_stylesheet(),
+			'templates' => $out,
+		);
+	}
+
+	public function plugin_capability_matrix( $args = array() ) {
+		$groups = McpSupport::enabled_groups();
+		$seo    = McpSeo::active_providers();
+		$matrix = array(
+			'acf' => array(
+				'active' => function_exists( 'get_fields' ),
+				'tools'  => array( 'list_acf_field_groups', 'list_acf_options_pages', 'get_acf_schema', 'get_options_page', 'update_options_page', 'acf_media_audit' ),
+				'group'  => 'acf',
+				'enabled'=> ! empty( $groups['acf'] ),
+			),
+			'yoast' => array(
+				'active' => in_array( 'yoast', $seo, true ) || class_exists( 'WPSEO_Meta' ) || defined( 'WPSEO_VERSION' ),
+				'tools'  => array( 'bulk_update_yoast', 'seo_audit', 'bulk_update_seo' ),
+				'group'  => 'seo',
+				'enabled'=> ! empty( $groups['seo'] ),
+			),
+			'rankmath' => array(
+				'active' => in_array( 'rankmath', $seo, true ) || class_exists( 'RankMath' ) || defined( 'RANK_MATH_VERSION' ),
+				'tools'  => array( 'bulk_update_seo', 'seo_audit' ),
+				'group'  => 'seo',
+				'enabled'=> ! empty( $groups['seo'] ),
+			),
+			'seopress' => array(
+				'active' => in_array( 'seopress', $seo, true ) || defined( 'SEOPRESS_VERSION' ),
+				'tools'  => array( 'bulk_update_seo', 'seo_audit' ),
+				'group'  => 'seo',
+				'enabled'=> ! empty( $groups['seo'] ),
+			),
+			'redirects' => array(
+				'active'  => (bool) McpSupport::redirects_backend(),
+				'backend' => McpSupport::redirects_backend(),
+				'tools'   => array( 'list_redirects', 'create_redirect', 'update_redirect', 'delete_redirect', 'import_redirects' ),
+				'group'   => 'redirects',
+				'enabled' => ! empty( $groups['redirects'] ),
+			),
+			'media' => array(
+				'active' => true,
+				'tools'  => array( 'list_media', 'get_media', 'update_media', 'upload_media', 'bulk_fix_media_alt', 'media_alt_report', 'prepare_media_upload', 'replace_attachment_file', 'dedupe_attachments' ),
+				'group'  => 'media',
+				'enabled'=> ! empty( $groups['media'] ),
+			),
+			'menus' => array(
+				'active' => true,
+				'tools'  => array( 'list_menus', 'get_menu', 'create_menu', 'update_menu', 'delete_menu', 'update_menu_items' ),
+				'group'  => 'menus',
+				'enabled'=> ! empty( $groups['menus'] ),
+			),
+		);
+		$unlocked = array();
+		foreach ( $matrix as $key => $row ) {
+			$available = ! empty( $row['active'] ) && ! empty( $row['enabled'] );
+			$matrix[ $key ]['available'] = $available;
+			if ( $available ) {
+				$unlocked = array_merge( $unlocked, $row['tools'] );
+			}
+		}
+		return array(
+			'providers' => $matrix,
+			'seo_providers' => $seo,
+			'unlocked_tools' => array_values( array_unique( $unlocked ) ),
+			'writes_enabled' => (bool) get_option( McpSupport::OPTION_ALLOW_WRITES ),
+			'hint' => 'available = plugin active AND tool group enabled in Settings.',
+		);
+	}
+
+	public function diff_public_html( $args ) {
+		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_read_post( $post_id );
+		$post = get_post( $post_id );
+		$url  = get_permalink( $post_id );
+		if ( ! $url ) {
+			throw new \Exception( 'No public permalink for this post.' );
+		}
+		if ( ! in_array( $post->post_status, array( 'publish', 'private' ), true ) && empty( $args['preview_url'] ) ) {
+			throw new \Exception( 'Post is not publicly viewable. Publish first, or pass preview_url from create_draft_preview.' );
+		}
+		$fetch_url = ! empty( $args['preview_url'] ) ? esc_url_raw( $args['preview_url'] ) : $url;
+		$ssl = apply_filters( 'mt_mcp_sslverify', true, $fetch_url );
+		$res = wp_remote_get(
+			$fetch_url,
+			array(
+				'timeout'     => 15,
+				'redirection' => 3,
+				'sslverify'   => $ssl,
+				'headers'     => array( 'User-Agent' => 'MT-MCP-diff_public_html/' . ( defined( 'MT_MCP_VERSION' ) ? MT_MCP_VERSION : '1' ) ),
+			)
+		);
+		if ( is_wp_error( $res ) ) {
+			throw new \Exception( 'Fetch failed: ' . $res->get_error_message() );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		$html = (string) wp_remote_retrieve_body( $res );
+		$title = '';
+		if ( preg_match( '/<title[^>]*>(.*?)<\/title>/is', $html, $m ) ) {
+			$title = trim( html_entity_decode( wp_strip_all_tags( $m[1] ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+		}
+		$h1 = '';
+		if ( preg_match( '/<h1[^>]*>(.*?)<\/h1>/is', $html, $m ) ) {
+			$h1 = trim( html_entity_decode( wp_strip_all_tags( $m[1] ), ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+		}
+		$meta_desc = '';
+		if ( preg_match( '/<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)["\']/i', $html, $m )
+			|| preg_match( '/<meta[^>]+content=["\']([^"\']*)["\'][^>]+name=["\']description["\']/i', $html, $m ) ) {
+			$meta_desc = trim( html_entity_decode( $m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
+		}
+		$canonical = '';
+		if ( preg_match( '/<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']/i', $html, $m )
+			|| preg_match( '/<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']canonical["\']/i', $html, $m ) ) {
+			$canonical = $m[1];
+		}
+		$expected_title = get_the_title( $post );
+		$yoast = McpSupport::get_yoast_fields( $post_id );
+		$expected_desc = isset( $yoast['metadesc'] ) ? (string) $yoast['metadesc'] : '';
+		$needle = isset( $args['expect_contains'] ) ? (string) $args['expect_contains'] : '';
+		$body_has = $needle !== '' ? ( false !== strpos( $html, $needle ) || false !== strpos( wp_strip_all_tags( $html ), $needle ) ) : null;
+
+		$checks = array(
+			array(
+				'key'      => 'http_status',
+				'ok'       => $code >= 200 && $code < 400,
+				'expected' => '2xx/3xx',
+				'actual'   => $code,
+			),
+			array(
+				'key'      => 'title_contains_post_title',
+				'ok'       => $expected_title && false !== stripos( $title, $expected_title ),
+				'expected' => $expected_title,
+				'actual'   => $title,
+			),
+			array(
+				'key'      => 'h1_present',
+				'ok'       => '' !== $h1,
+				'expected' => 'non-empty h1',
+				'actual'   => $h1,
+			),
+		);
+		if ( $expected_desc ) {
+			$checks[] = array(
+				'key'      => 'meta_description',
+				'ok'       => $meta_desc && false !== stripos( $meta_desc, substr( $expected_desc, 0, 40 ) ),
+				'expected' => $expected_desc,
+				'actual'   => $meta_desc,
+			);
+		}
+		if ( null !== $body_has ) {
+			$checks[] = array(
+				'key'      => 'expect_contains',
+				'ok'       => (bool) $body_has,
+				'expected' => $needle,
+				'actual'   => $body_has ? 'found' : 'missing',
+			);
+		}
+		$failed = array_values( array_filter( $checks, function ( $c ) { return empty( $c['ok'] ); } ) );
+		return array(
+			'id'       => $post_id,
+			'url'      => $fetch_url,
+			'http'     => $code,
+			'extracted'=> array(
+				'title'      => $title,
+				'h1'         => $h1,
+				'meta_desc'  => $meta_desc,
+				'canonical'  => $canonical,
+				'html_bytes' => strlen( $html ),
+			),
+			'checks'   => $checks,
+			'summary'  => array(
+				'ok'     => empty( $failed ),
+				'failed' => count( $failed ),
+			),
+		);
+	}
+
+	public function check_links( $args ) {
+		$post_type = isset( $args['post_type'] ) ? sanitize_key( $args['post_type'] ) : '';
+		$post_id   = ! empty( $args['id'] ) || ! empty( $args['post_id'] ) || ! empty( $args['url'] ) ? McpSupport::resolve_post_id( $args ) : 0;
+		$limit     = isset( $args['limit'] ) ? max( 1, min( 40, (int) $args['limit'] ) ) : 20;
+		$max_links = isset( $args['max_links'] ) ? max( 1, min( 50, (int) $args['max_links'] ) ) : 30;
+
+		$posts = array();
+		if ( $post_id ) {
+			McpSupport::assert_can_read_post( $post_id );
+			$posts[] = get_post( $post_id );
+		} else {
+			if ( ! $post_type || ! post_type_exists( $post_type ) ) {
+				throw new \Exception( 'Provide id/url or post_type.' );
+			}
+			$q = new \WP_Query(
+				array(
+					'post_type'      => $post_type,
+					'post_status'    => isset( $args['status'] ) ? $args['status'] : 'publish',
+					'posts_per_page' => $limit,
+					'orderby'        => 'modified',
+					'order'          => 'DESC',
+				)
+			);
+			$posts = $q->posts;
+		}
+
+		$seen  = array();
+		$links = array();
+		foreach ( $posts as $p ) {
+			if ( ! $p ) {
+				continue;
+			}
+			$html = $p->post_content;
+			if ( function_exists( 'get_fields' ) ) {
+				$acf = get_fields( $p->ID );
+				if ( is_array( $acf ) ) {
+					$html .= ' ' . wp_json_encode( $acf );
+				}
+			}
+			if ( preg_match_all( '/https?:\/\/[^\s"\'<>]+/i', $html, $m ) ) {
+				foreach ( $m[0] as $href ) {
+					$href = rtrim( $href, '.,);]' );
+					$key  = strtolower( $href );
+					if ( isset( $seen[ $key ] ) ) {
+						continue;
+					}
+					$seen[ $key ] = true;
+					$links[] = array( 'url' => $href, 'post_id' => (int) $p->ID );
+					if ( count( $links ) >= $max_links ) {
+						break 2;
+					}
+				}
+			}
+		}
+
+		$results = array();
+		foreach ( $links as $link ) {
+			$ssl  = apply_filters( 'mt_mcp_sslverify', true, $link['url'] );
+			$res  = wp_remote_head(
+				$link['url'],
+				array(
+					'timeout'     => 8,
+					'redirection' => 3,
+					'sslverify'   => $ssl,
+				)
+			);
+			if ( is_wp_error( $res ) ) {
+				// Some hosts reject HEAD — try GET.
+				$res = wp_remote_get(
+					$link['url'],
+					array(
+						'timeout'     => 8,
+						'redirection' => 3,
+						'sslverify'   => $ssl,
+						'headers'     => array( 'Range' => 'bytes=0-0' ),
+					)
+				);
+			}
+			if ( is_wp_error( $res ) ) {
+				$results[] = array(
+					'url'     => $link['url'],
+					'post_id' => $link['post_id'],
+					'ok'      => false,
+					'error'   => $res->get_error_message(),
+				);
+				continue;
+			}
+			$code = (int) wp_remote_retrieve_response_code( $res );
+			$results[] = array(
+				'url'     => $link['url'],
+				'post_id' => $link['post_id'],
+				'ok'      => $code >= 200 && $code < 400,
+				'status'  => $code,
+			);
+		}
+		$broken = array_values( array_filter( $results, function ( $r ) { return empty( $r['ok'] ); } ) );
+		return array(
+			'checked' => count( $results ),
+			'broken'  => count( $broken ),
+			'results' => $results,
+			'broken_links' => $broken,
+		);
+	}
+
+	public function replace_attachment_file( $args ) {
+		$id = 0;
+		foreach ( array( 'id', 'attachment_id', 'media_id' ) as $k ) {
+			if ( ! empty( $args[ $k ] ) ) {
+				$id = (int) $args[ $k ];
+				break;
+			}
+		}
+		if ( ! $id ) {
+			throw new \Exception( 'Provide id of the attachment to replace.' );
+		}
+		$att = get_post( $id );
+		if ( ! $att || 'attachment' !== $att->post_type ) {
+			throw new \Exception( 'Attachment not found.' );
+		}
+		if ( ! current_user_can( 'edit_post', $id ) ) {
+			throw new \Exception( 'Cannot edit attachment #' . $id . '.' );
+		}
+
+		$tmp  = '';
+		$name = isset( $args['filename'] ) ? sanitize_file_name( $args['filename'] ) : '';
+		if ( ! empty( $args['data_base64'] ) ) {
+			$bin = base64_decode( (string) $args['data_base64'], true );
+			if ( false === $bin ) {
+				throw new \Exception( 'Invalid data_base64.' );
+			}
+			if ( strlen( $bin ) > 15 * 1024 * 1024 ) {
+				throw new \Exception( 'Max 15MB for replace_attachment_file.' );
+			}
+			if ( ! $name ) {
+				$name = basename( get_attached_file( $id ) );
+			}
+			$tmp = wp_tempnam( $name );
+			file_put_contents( $tmp, $bin );
+		} elseif ( ! empty( $args['source_url'] ) ) {
+			$url = McpSupport::assert_safe_remote_url( $args['source_url'] );
+			$ssl = apply_filters( 'mt_mcp_sslverify', true, $url );
+			$res = wp_remote_get( $url, array( 'timeout' => 30, 'redirection' => 0, 'sslverify' => $ssl ) );
+			if ( is_wp_error( $res ) ) {
+				throw new \Exception( $res->get_error_message() );
+			}
+			$code = (int) wp_remote_retrieve_response_code( $res );
+			if ( $code < 200 || $code >= 300 ) {
+				throw new \Exception( 'source_url HTTP ' . $code );
+			}
+			$body = wp_remote_retrieve_body( $res );
+			if ( ! $name ) {
+				$path = wp_parse_url( $url, PHP_URL_PATH );
+				$name = $path ? basename( $path ) : ( 'replace-' . $id );
+			}
+			$tmp = wp_tempnam( $name );
+			file_put_contents( $tmp, $body );
+		} else {
+			throw new \Exception( 'Provide data_base64 or source_url.' );
+		}
+
+		if ( ! empty( $args['dry_run'] ) ) {
+			$size = file_exists( $tmp ) ? filesize( $tmp ) : 0;
+			@unlink( $tmp );
+			return array(
+				'dry_run' => true,
+				'id'      => $id,
+				'would_replace_bytes' => $size,
+				'filename'=> $name,
+			);
+		}
+
+		// Snapshot for undo (media meta only — file bytes not restored).
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/media.php';
+		require_once ABSPATH . 'wp-admin/includes/image.php';
+
+		$file_array = array(
+			'name'     => $name,
+			'tmp_name' => $tmp,
+		);
+		$overrides = array( 'test_form' => false );
+		$moved = wp_handle_sideload( $file_array, $overrides );
+		if ( ! empty( $moved['error'] ) ) {
+			@unlink( $tmp );
+			throw new \Exception( $moved['error'] );
+		}
+
+		$old_file = get_attached_file( $id );
+		$meta     = wp_get_attachment_metadata( $id );
+		// Remove old sized derivatives if present.
+		if ( $old_file && ! empty( $meta['sizes'] ) && is_array( $meta['sizes'] ) ) {
+			$dir = trailingslashit( dirname( $old_file ) );
+			foreach ( $meta['sizes'] as $size ) {
+				if ( ! empty( $size['file'] ) && file_exists( $dir . $size['file'] ) ) {
+					@unlink( $dir . $size['file'] );
+				}
+			}
+		}
+		if ( $old_file && file_exists( $old_file ) && $old_file !== $moved['file'] ) {
+			@unlink( $old_file );
+		}
+
+		update_attached_file( $id, $moved['file'] );
+		$new_meta = wp_generate_attachment_metadata( $id, $moved['file'] );
+		wp_update_attachment_metadata( $id, $new_meta );
+
+		$mime = isset( $moved['type'] ) ? $moved['type'] : get_post_mime_type( $id );
+		wp_update_post(
+			array(
+				'ID'             => $id,
+				'post_mime_type' => $mime,
+			)
+		);
+		if ( array_key_exists( 'alt', $args ) ) {
+			update_post_meta( $id, '_wp_attachment_image_alt', sanitize_text_field( $args['alt'] ) );
+		}
+
+		$out = $this->get_media( array( 'id' => $id ) );
+		$out['replaced'] = true;
+		$out['note'] = 'Attachment ID preserved for ACF image fields. File bytes are not covered by undo_change.';
+		return $out;
 	}
 
 }

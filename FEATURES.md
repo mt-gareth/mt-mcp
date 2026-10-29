@@ -54,6 +54,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 - [x] Per-change undo journal (`undo.token`, `list_changes` / `get_change` / `undo_change`) + Changes admin UI
 - [x] Three-gate dispatch documented in site context / connection doctor
 
+### Shipped in 1.3.3
+
+- [x] `list_theme_templates`, `plugin_capability_matrix`, `diff_public_html`, `check_links`, `replace_attachment_file`
+
 ---
 
 ## Capability map (what works today)
@@ -167,18 +171,18 @@ Makes sessions smoother or safer; not daily blockers.
 
 ### Content & QA polish
 
-- [ ] **Public HTML verification** after content edits (`diff_public_html`)
+- [x] **Public HTML verification** after content edits (`diff_public_html`)
 - [ ] **OG / Twitter / canonical / primary category / breadcrumb** SEO helpers
 - [ ] **Sitemap crawl with soft-404 body checks** (beyond HEAD)
 - [ ] **Unused media report**
 - [ ] **Media fingerprint** find-before-upload (extend SHA dedupe)
 - [ ] **SVG sanitize** on upload
-- [ ] **Replace attachment file** (keep ID — preserves ACF image fields)
-- [ ] **Link checker** across a post type (capped)
+- [x] **Replace attachment file** (keep ID — preserves ACF image fields)
+- [x] **Link checker** across a post type (capped)
 - [ ] **Bulk status / author / parent**
 - [ ] **`set post_author`** + safe `list_users` for assignment
-- [ ] **Theme templates list** — `get_page_templates()`
-- [ ] **Plugin capability matrix** — which SEO/redirect tools unlock for this site
+- [x] **Theme templates list** — `list_theme_templates` (+ `describe_post_type`)
+- [x] **Plugin capability matrix** — which SEO/redirect tools unlock for this site
 - [ ] **CPT deep inventory / permalinks clash list**
 
 ### Agent collaboration & recovery
