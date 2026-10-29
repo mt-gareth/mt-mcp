@@ -2,9 +2,9 @@
 Contributors: motiontactic
 Tags: mcp, ai, oauth, cursor, claude, acf, rest-api
 Requires at least: 6.1
-Tested up to: 6.8
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.15
+Stable tag: 1.3.16
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,10 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 
 == Changelog ==
 
+= 1.3.16 =
+* Plugin icon for Updates / details UI
+* Tested up to WordPress 7.1 (fixes “not tested” / Compatible up to 6.8.999 on WP 7.x)
+
 = 1.3.15 =
 * Plugins list Settings link → Overview
 * Friendlier OAuth grant client names (Claude CIMD → “Claude”; truncate long URLs)
@@ -65,6 +69,9 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk second lock; menu:// and media://missing-alt resources; Doctor auth/WAF probe
 
 == Upgrade Notice ==
+
+= 1.3.16 =
+Plugin icon; WordPress 7.1 compatibility metadata.
 
 = 1.3.15 =
 Settings link on Plugins screen; clearer OAuth grant client labels.

@@ -3,9 +3,9 @@
  * Plugin Name:       MT MCP
  * Plugin URI:        https://github.com/mt-gareth/mt-mcp
  * Description:       Standalone Model Context Protocol (MCP) server for WordPress. OAuth 2.1 / Application Password user login — no shared API keys.
- * Version:           1.3.15
+ * Version:           1.3.16
  * Requires at least: 6.1
- * Tested up to:      6.8
+ * Tested up to:      7.1
  * Requires PHP:      7.4
  * Author:            Motion Tactic
  * Author URI:        https://motiontactic.com
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'MT_MCP_VERSION', '1.3.15' );
+define( 'MT_MCP_VERSION', '1.3.16' );
 define( 'MT_MCP_FILE', __FILE__ );
 define( 'MT_MCP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MT_MCP_URL', plugin_dir_url( __FILE__ ) );

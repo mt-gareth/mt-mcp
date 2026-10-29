@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="MT MCP">
+  <rect width="256" height="256" rx="48" fill="#0B1220"/>
+  <!-- Protocol nodes -->
+  <circle cx="78" cy="128" r="22" fill="#2DD4BF"/>
+  <circle cx="178" cy="86" r="18" fill="#E8EEF7"/>
+  <circle cx="178" cy="170" r="18" fill="#94A3B8"/>
+  <!-- Handshake arcs -->
+  <path d="M98 118 C128 96 148 92 162 92" fill="none" stroke="#2DD4BF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M98 138 C128 160 148 164 162 164" fill="none" stroke="#64748B" stroke-width="10" stroke-linecap="round"/>
+</svg>
