@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       MT MCP
- * Plugin URI:        https://motiontactic.com
+ * Plugin URI:        https://github.com/mt-gareth/mt-mcp
  * Description:       Standalone Model Context Protocol (MCP) server for WordPress. OAuth 2.1 / Application Password user login — no shared API keys.
  * Version:           1.3.14
  * Requires at least: 6.1
@@ -13,7 +13,7 @@
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       mt-mcp
  * Domain Path:       /languages
- * Update URI:        false
+ * Update URI:        https://github.com/mt-gareth/mt-mcp
  */
 
 namespace MT\Mcp;
@@ -42,6 +42,7 @@ require_once MT_MCP_PATH . 'classes/class-mcp-tool-handlers.php';
 require_once MT_MCP_PATH . 'classes/class-mcp-server.php';
 require_once MT_MCP_PATH . 'classes/class-mcp-public.php';
 require_once MT_MCP_PATH . 'includes/class-mcp-recipes.php';
+require_once MT_MCP_PATH . 'includes/class-mcp-github-updater.php';
 require_once MT_MCP_PATH . 'admin/class-admin.php';
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 	require_once MT_MCP_PATH . 'includes/class-mcp-cli.php';
@@ -55,6 +56,7 @@ function boot() {
 	Migrator::maybe_migrate();
 	McpAuth::purge_legacy_key_options();
 	McpTokenStore::maybe_install();
+	McpGithubUpdater::boot();
 	new McpOAuth();
 	new McpServer();
 	new McpPublic();

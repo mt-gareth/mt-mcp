@@ -14,10 +14,11 @@ phpcs.xml.dist
 .phpunit*
 tests
 bin
+dist
 node_modules
 package.json
 package-lock.json
-mu-plugins
+.wordpress-org
 .DS_Store
 *.zip
 .env

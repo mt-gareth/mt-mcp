@@ -8,13 +8,37 @@ License: **GPL-2.0-or-later**.
 
 ## Install
 
-1. Copy or symlink this folder into `wp-content/plugins/mt-mcp`
-2. Activate **MT MCP**
-3. Open **Settings → MT MCP**, enable the server, copy the Cursor JSON
+**Recommended (clients):** download the zip from [Releases](https://github.com/mt-gareth/mt-mcp/releases) and upload under Plugins → Add New → Upload. The zip’s top-level folder must be `mt-mcp`.
+
+**Local symlink:**
 
 ```bash
-# local symlink example
 ln -s /absolute/path/to/mt-mcp /path/to/wp-content/plugins/mt-mcp
+```
+
+Then activate **MT MCP** → **Settings → MT MCP**.
+
+## Updates (GitHub Releases)
+
+Installed sites check [GitHub Releases](https://github.com/mt-gareth/mt-mcp/releases) the same way WordPress.org updates work (via [Plugin Update Checker](https://github.com/YahnisElsts/plugin-update-checker)).
+
+**Ship a new version:**
+
+1. Bump `Version:` in `mt-mcp.php` and `Stable tag:` in `readme.txt`
+2. Commit and push `main`
+3. Build + publish:
+
+```bash
+bin/build-release.sh --publish
+```
+
+That tags `vX.Y.Z`, builds `dist/mt-mcp-X.Y.Z.zip` (folder `mt-mcp/`), and attaches it to a GitHub Release. Client sites then see **update available** in Plugins.
+
+Optional `wp-config.php`:
+
+```php
+define( 'MT_MCP_GITHUB_TOKEN', 'ghp_...' ); // higher API rate limit; not required for public repo
+define( 'MT_MCP_DISABLE_UPDATES', true );   // air-gapped / never check GitHub
 ```
 
 ## Connect (Cursor)
@@ -67,8 +91,11 @@ wp --skip-plugins mt-mcp-guard rollback
 define( 'MT_MCP_ENVIRONMENT', 'staging' ); // production | staging | development | unknown
 define( 'MT_MCP_PUBLIC_BASE', 'https://tunnel.example' ); // optional OAuth advertise URL
 define( 'MT_MCP_SSLVERIFY', false ); // optional; only if you must disable TLS verify site-wide
+define( 'MT_MCP_GITHUB_REPO', 'https://github.com/mt-gareth/mt-mcp/' ); // override update source
 ```
 
 ## Roadmap / feature lock
 
 v1.3.x is feature-locked for polish and security. See [FEATURES.md](./FEATURES.md) and [readme.txt](./readme.txt).
+
+Repo: [github.com/mt-gareth/mt-mcp](https://github.com/mt-gareth/mt-mcp)

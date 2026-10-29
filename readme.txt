@@ -52,6 +52,7 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk + write gates on attachment dedupe; SSRF guards on sitemap/HTML fetch and webhooks
 * SVG sanitize on upload tickets; undo journal object caps; playground allowlist; ABSPATH guards
 * Connection labels (set_connection_label + Overview UI); Overview Copy URL layout fix; WP.org packaging (readme.txt, GPL, uninstall, Domain Path)
+* GitHub Releases updater (public repo mt-gareth/mt-mcp) for in-dashboard plugin updates
 
 = 1.3.13 =
 * Client rollout recipe / client_rollout prompt; expanded cookbook; get_usage_insights
