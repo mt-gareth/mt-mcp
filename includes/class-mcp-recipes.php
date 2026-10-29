@@ -55,7 +55,7 @@ class McpRecipes {
 				'minutes'    => 15,
 				'writes'     => false,
 				'tags'       => array( 'acf', 'skill', 'inventory' ),
-				'prompt'     => "Onboard this MT client site for future agent sessions.\n\n1. get_site_context — note environment, theme, ACF/Yoast/redirects, Site Brief.\n2. list_post_types + describe_post_type for each public CPT we care about.\n3. list_acf_field_groups + get_acf_schema for the main page/CPT types (flexible layouts included).\n4. list_acf_options_pages + get_options_page for site-wide options.\n5. list_menus + get_menu for each location.\n6. plugin_capability_matrix — note which SEO/redirect packs are unlocked.\n7. generate_cursor_skill and return the skill markdown so I can save it in the client repo.\n\nRead only. Do not mutate content.",
+				'prompt'     => "Onboard this MT client site for future agent sessions.\n\n1. get_site_context — note environment, theme, ACF/Yoast/redirects, Site Brief.\n2. inventory_post_types (+ permalink_clash_report) and describe_post_type for each public CPT we care about.\n3. list_acf_field_groups + get_acf_schema for the main page/CPT types (flexible layouts included).\n4. list_acf_options_pages + get_options_page for site-wide options.\n5. list_menus + get_menu for each location.\n6. plugin_capability_matrix — note which SEO/redirect packs are unlocked.\n7. generate_cursor_skill and return the skill markdown so I can save it in the client repo.\n\nRead only. Do not mutate content.",
 			),
 			array(
 				'id'         => 'session-plan',
@@ -121,7 +121,7 @@ class McpRecipes {
 				'minutes'    => 20,
 				'writes'     => true,
 				'tags'       => array( 'yoast', 'rankmath', 'seo_audit' ),
-				'prompt'     => "Run an SEO pass on post_type=\"[page or post]\".\n\n1. get_site_context + plugin_capability_matrix (confirm Yoast / Rank Math / SEOPress).\n2. seo_audit for that post type.\n3. For the worst offenders, get_post include:[\"core\",\"yoast\"] and draft improved title / metadesc / focuskw (title ≤60, metadesc ≤160).\n4. Preview with bulk_update_yoast or bulk_update_seo dry_run:true.\n5. Apply only after I approve.\n\nDo not publish drafts or change canonicals unless asked.",
+				'prompt'     => "Run an SEO pass on post_type=\"[page or post]\".\n\n1. get_site_context + plugin_capability_matrix (confirm Yoast / Rank Math / SEOPress).\n2. seo_audit + seo_social_audit for that post type.\n3. For the worst offenders, get_seo_social / get_post include:[\"core\",\"yoast\"] and draft improved title / metadesc / focuskw / OG (title ≤60, metadesc ≤160).\n4. Preview with bulk_update_yoast or bulk_update_seo dry_run:true.\n5. Apply only after I approve.\n\nDo not publish drafts or change canonicals unless asked.",
 			),
 			array(
 				'id'         => 'media-alt-pass',

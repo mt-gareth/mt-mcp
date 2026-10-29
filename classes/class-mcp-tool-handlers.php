@@ -2496,6 +2496,19 @@ class McpToolHandlers {
 			file_put_contents( $tmp, $bytes ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 		}
 
+		$sha = hash_file( 'sha256', $tmp );
+		if ( $sha && empty( $args['force_new'] ) ) {
+			$existing = self::find_attachment_by_sha( $sha );
+			if ( $existing ) {
+				@unlink( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+				$out = $this->get_media( array( 'id' => $existing ) );
+				$out['reused'] = true;
+				$out['sha256'] = $sha;
+				$out['note'] = 'Matched existing attachment by SHA-256; skipped upload. Pass force_new=true to upload a duplicate.';
+				return $out;
+			}
+		}
+
 		$file_array = array(
 			'name'     => sanitize_file_name( $filename ),
 			'tmp_name' => $tmp,
@@ -4164,7 +4177,7 @@ MD;
 			),
 			'yoast' => array(
 				'active' => in_array( 'yoast', $seo, true ) || class_exists( 'WPSEO_Meta' ) || defined( 'WPSEO_VERSION' ),
-				'tools'  => array( 'bulk_update_yoast', 'seo_audit', 'bulk_update_seo' ),
+				'tools'  => array( 'bulk_update_yoast', 'seo_audit', 'get_seo_social', 'seo_social_audit', 'bulk_update_seo' ),
 				'group'  => 'seo',
 				'enabled'=> ! empty( $groups['seo'] ),
 			),
@@ -4189,7 +4202,7 @@ MD;
 			),
 			'media' => array(
 				'active' => true,
-				'tools'  => array( 'list_media', 'get_media', 'update_media', 'upload_media', 'bulk_fix_media_alt', 'media_alt_report', 'prepare_media_upload', 'replace_attachment_file', 'dedupe_attachments' ),
+				'tools'  => array( 'list_media', 'get_media', 'update_media', 'upload_media', 'find_media_by_hash', 'bulk_fix_media_alt', 'media_alt_report', 'prepare_media_upload', 'replace_attachment_file', 'dedupe_attachments' ),
 				'group'  => 'media',
 				'enabled'=> ! empty( $groups['media'] ),
 			),
@@ -4764,6 +4777,303 @@ MD;
 			'dry_run' => $dry_run,
 			'updated' => count( array_filter( $results, function ( $r ) { return ! empty( $r['ok'] ); } ) ),
 			'results' => $results,
+		);
+	}
+
+
+	/**
+	 * Find attachment ID by _mt_mcp_sha256.
+	 *
+	 * @param string $sha Hex sha256.
+	 * @return int
+	 */
+	private static function find_attachment_by_sha( $sha ) {
+		$sha = strtolower( (string) $sha );
+		if ( ! preg_match( '/^[a-f0-9]{64}$/', $sha ) ) {
+			return 0;
+		}
+		global $wpdb;
+		$id = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_mt_mcp_sha256' AND meta_value = %s ORDER BY post_id ASC LIMIT 1",
+				$sha
+			)
+		);
+		return ( $id && get_post( $id ) ) ? $id : 0;
+	}
+
+	public function find_media_by_hash( $args ) {
+		$sha = isset( $args['sha256'] ) ? strtolower( sanitize_text_field( $args['sha256'] ) ) : '';
+		if ( ! $sha && ! empty( $args['data_base64'] ) ) {
+			$bytes = base64_decode( (string) $args['data_base64'], true );
+			if ( false === $bytes ) {
+				throw new \Exception( 'Invalid data_base64.' );
+			}
+			$sha = hash( 'sha256', $bytes );
+		}
+		if ( ! $sha && ! empty( $args['source_url'] ) ) {
+			$url = McpSupport::assert_safe_remote_url( $args['source_url'] );
+			$res = wp_remote_get( $url, array( 'timeout' => 30, 'redirection' => 0, 'sslverify' => apply_filters( 'mt_mcp_sslverify', true, $url ) ) );
+			if ( is_wp_error( $res ) ) {
+				throw new \Exception( $res->get_error_message() );
+			}
+			$sha = hash( 'sha256', (string) wp_remote_retrieve_body( $res ) );
+		}
+		if ( ! preg_match( '/^[a-f0-9]{64}$/', $sha ) ) {
+			throw new \Exception( 'Provide sha256, data_base64, or source_url.' );
+		}
+		$id = self::find_attachment_by_sha( $sha );
+		if ( ! $id ) {
+			return array( 'found' => false, 'sha256' => $sha );
+		}
+		$media = $this->get_media( array( 'id' => $id ) );
+		$media['found'] = true;
+		$media['sha256'] = $sha;
+		return $media;
+	}
+
+	public function get_seo_social( $args ) {
+		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_read_post( $post_id );
+		$yoast = McpSupport::get_yoast_fields( $post_id );
+		$primary_id = (int) get_post_meta( $post_id, '_yoast_wpseo_primary_category', true );
+		$primary = null;
+		if ( $primary_id ) {
+			$term = get_term( $primary_id );
+			if ( $term && ! is_wp_error( $term ) ) {
+				$primary = array( 'id' => (int) $term->term_id, 'name' => $term->name, 'slug' => $term->slug, 'taxonomy' => $term->taxonomy );
+			}
+		}
+		$crumbs = array();
+		if ( class_exists( 'WPSEO_Breadcrumbs' ) && method_exists( 'WPSEO_Breadcrumbs', 'breadcrumb' ) ) {
+			// Prefer structured links when available.
+			if ( function_exists( 'yoast_breadcrumb' ) ) {
+				$html = yoast_breadcrumb( '', '', false );
+				if ( is_string( $html ) && $html ) {
+					$crumbs['html'] = wp_strip_all_tags( $html );
+				}
+			}
+		}
+		$permalink = get_permalink( $post_id );
+		return array(
+			'id'        => $post_id,
+			'permalink' => $permalink,
+			'canonical' => ! empty( $yoast['canonical'] ) ? $yoast['canonical'] : $permalink,
+			'og'        => array(
+				'title'       => isset( $yoast['opengraph-title'] ) ? $yoast['opengraph-title'] : '',
+				'description' => isset( $yoast['opengraph-description'] ) ? $yoast['opengraph-description'] : '',
+				'image'       => isset( $yoast['opengraph-image'] ) ? $yoast['opengraph-image'] : '',
+			),
+			'twitter'   => array(
+				'title'       => isset( $yoast['twitter-title'] ) ? $yoast['twitter-title'] : '',
+				'description' => isset( $yoast['twitter-description'] ) ? $yoast['twitter-description'] : '',
+				'image'       => isset( $yoast['twitter-image'] ) ? $yoast['twitter-image'] : '',
+			),
+			'primary_category' => $primary,
+			'breadcrumb'       => $crumbs,
+			'yoast'            => $yoast,
+			'gaps'             => array_values(
+				array_filter(
+					array(
+						empty( $yoast['opengraph-title'] ) && empty( $yoast['title'] ) ? 'missing_og_title' : null,
+						empty( $yoast['opengraph-description'] ) && empty( $yoast['metadesc'] ) ? 'missing_og_description' : null,
+						empty( $yoast['opengraph-image'] ) && ! get_post_thumbnail_id( $post_id ) ? 'missing_og_image' : null,
+						empty( $yoast['canonical'] ) ? 'canonical_defaults_to_permalink' : null,
+						! $primary && is_object_in_taxonomy( get_post_type( $post_id ), 'category' ) ? 'missing_primary_category' : null,
+					)
+				)
+			),
+		);
+	}
+
+	public function seo_social_audit( $args = array() ) {
+		$post_type = isset( $args['post_type'] ) ? sanitize_key( $args['post_type'] ) : 'page';
+		$status    = isset( $args['status'] ) ? $args['status'] : 'publish';
+		$limit     = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 40;
+		$q = new \WP_Query(
+			array(
+				'post_type'      => $post_type,
+				'post_status'    => $status,
+				'posts_per_page' => $limit,
+				'orderby'        => 'modified',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+			)
+		);
+		$items = array();
+		foreach ( $q->posts as $id ) {
+			$row = $this->get_seo_social( array( 'id' => (int) $id ) );
+			if ( ! empty( $row['gaps'] ) ) {
+				$items[] = array(
+					'id'    => (int) $id,
+					'title' => get_the_title( $id ),
+					'url'   => get_permalink( $id ),
+					'gaps'  => $row['gaps'],
+				);
+			}
+		}
+		return array(
+			'post_type' => $post_type,
+			'scanned'   => count( $q->posts ),
+			'with_gaps' => count( $items ),
+			'items'     => $items,
+		);
+	}
+
+	public function inventory_post_types( $args = array() ) {
+		$include_private = ! empty( $args['include_private'] );
+		$types = get_post_types( $include_private ? array() : array( 'public' => true ), 'objects' );
+		$out = array();
+		foreach ( $types as $type ) {
+			if ( in_array( $type->name, array( 'attachment', 'revision', 'nav_menu_item', 'custom_css', 'customize_changeset', 'oembed_cache', 'user_request', 'wp_block', 'wp_template', 'wp_template_part', 'wp_global_styles', 'wp_navigation', 'wp_font_family', 'wp_font_face' ), true ) ) {
+				continue;
+			}
+			$counts = wp_count_posts( $type->name );
+			$count_out = array();
+			if ( $counts ) {
+				foreach ( get_object_vars( $counts ) as $st => $n ) {
+					if ( (int) $n > 0 ) {
+						$count_out[ $st ] = (int) $n;
+					}
+				}
+			}
+			$out[] = array(
+				'name'         => $type->name,
+				'label'        => $type->label,
+				'public'       => (bool) $type->public,
+				'hierarchical' => (bool) $type->hierarchical,
+				'has_archive'  => (bool) $type->has_archive,
+				'rewrite'      => $type->rewrite,
+				'rest_base'    => $type->rest_base ? $type->rest_base : $type->name,
+				'supports'     => get_all_post_type_supports( $type->name ),
+				'taxonomies'   => get_object_taxonomies( $type->name ),
+				'counts'       => $count_out,
+			);
+		}
+		return array( 'post_types' => $out, 'count' => count( $out ) );
+	}
+
+	public function permalink_clash_report( $args = array() ) {
+		global $wpdb;
+		$limit = isset( $args['limit'] ) ? max( 1, min( 200, (int) $args['limit'] ) ) : 50;
+		$rows = $wpdb->get_results(
+			"SELECT post_name, COUNT(*) AS c, GROUP_CONCAT(ID ORDER BY ID SEPARATOR ',') AS ids, GROUP_CONCAT(post_type ORDER BY ID SEPARATOR ',') AS types
+			 FROM {$wpdb->posts}
+			 WHERE post_status IN ('publish','private','draft','pending','future')
+			   AND post_type NOT IN ('revision','nav_menu_item','attachment','custom_css','customize_changeset')
+			   AND post_name <> ''
+			 GROUP BY post_name
+			 HAVING c > 1
+			 ORDER BY c DESC
+			 LIMIT " . (int) $limit,
+			ARRAY_A
+		);
+		$clashes = array();
+		foreach ( (array) $rows as $row ) {
+			$ids = array_map( 'intval', explode( ',', $row['ids'] ) );
+			$types = explode( ',', $row['types'] );
+			$items = array();
+			foreach ( $ids as $i => $pid ) {
+				$items[] = array(
+					'id'     => $pid,
+					'type'   => isset( $types[ $i ] ) ? $types[ $i ] : '',
+					'title'  => get_the_title( $pid ),
+					'status' => get_post_status( $pid ),
+					'url'    => get_permalink( $pid ),
+				);
+			}
+			$clashes[] = array(
+				'slug'  => $row['post_name'],
+				'count' => (int) $row['c'],
+				'posts' => $items,
+			);
+		}
+		return array(
+			'clash_count' => count( $clashes ),
+			'clashes'     => $clashes,
+			'hint'        => 'Same post_name across posts/CPTs can confuse permalinks and imports. Prefer unique slugs per site.',
+		);
+	}
+
+	public function flush_caches( $args = array() ) {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			throw new \Exception( 'manage_options required.' );
+		}
+		$targets = isset( $args['targets'] ) && is_array( $args['targets'] ) ? $args['targets'] : array( 'object_cache' );
+		$allowed = array( 'object_cache', 'rewrites', 'wp_rocket', 'litespeed', 'w3tc', 'autoptimize', 'elementor' );
+		$dry = ! empty( $args['dry_run'] );
+		$done = array();
+		$skipped = array();
+		foreach ( $targets as $t ) {
+			$t = sanitize_key( $t );
+			if ( ! in_array( $t, $allowed, true ) ) {
+				$skipped[] = array( 'target' => $t, 'reason' => 'not_allowlisted' );
+				continue;
+			}
+			if ( $dry ) {
+				$done[] = array( 'target' => $t, 'dry_run' => true );
+				continue;
+			}
+			switch ( $t ) {
+				case 'object_cache':
+					wp_cache_flush();
+					$done[] = array( 'target' => $t, 'ok' => true );
+					break;
+				case 'rewrites':
+					flush_rewrite_rules( false );
+					$done[] = array( 'target' => $t, 'ok' => true );
+					break;
+				case 'wp_rocket':
+					if ( function_exists( 'rocket_clean_domain' ) ) {
+						rocket_clean_domain();
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} else {
+						$skipped[] = array( 'target' => $t, 'reason' => 'plugin_inactive' );
+					}
+					break;
+				case 'litespeed':
+					if ( class_exists( 'LiteSpeed\\Purge' ) ) {
+						\LiteSpeed\Purge::purge_all();
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} elseif ( has_action( 'litespeed_purge_all' ) ) {
+						do_action( 'litespeed_purge_all' );
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} else {
+						$skipped[] = array( 'target' => $t, 'reason' => 'plugin_inactive' );
+					}
+					break;
+				case 'w3tc':
+					if ( function_exists( 'w3tc_flush_all' ) ) {
+						w3tc_flush_all();
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} else {
+						$skipped[] = array( 'target' => $t, 'reason' => 'plugin_inactive' );
+					}
+					break;
+				case 'autoptimize':
+					if ( class_exists( 'autoptimizeCache' ) && method_exists( 'autoptimizeCache', 'clearall' ) ) {
+						\autoptimizeCache::clearall();
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} else {
+						$skipped[] = array( 'target' => $t, 'reason' => 'plugin_inactive' );
+					}
+					break;
+				case 'elementor':
+					if ( class_exists( '\\Elementor\\Plugin' ) ) {
+						\Elementor\Plugin::$instance->files_manager->clear_cache();
+						$done[] = array( 'target' => $t, 'ok' => true );
+					} else {
+						$skipped[] = array( 'target' => $t, 'reason' => 'plugin_inactive' );
+					}
+					break;
+			}
+		}
+		return array(
+			'dry_run'  => $dry,
+			'flushed'  => $done,
+			'skipped'  => $skipped,
+			'allowed'  => $allowed,
+			'hint'     => 'Allowlisted only — no shell, no arbitrary cache plugins.',
 		);
 	}
 

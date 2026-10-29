@@ -189,10 +189,10 @@ Makes sessions smoother or safer; not daily blockers.
 ### Content & QA polish
 
 - [x] **Public HTML verification** after content edits (`diff_public_html`)
-- [ ] **OG / Twitter / canonical / primary category / breadcrumb** SEO helpers
+- [x] **OG / Twitter / canonical / primary category / breadcrumb** — `get_seo_social` / `seo_social_audit`
 - [ ] **Sitemap crawl with soft-404 body checks** (beyond HEAD)
 - [x] **Unused media report** — `unused_media_report`
-- [ ] **Media fingerprint** find-before-upload (extend SHA dedupe)
+- [x] **Media fingerprint** — `find_media_by_hash` + `upload_media` SHA reuse (`force_new` to duplicate)
 - [ ] **SVG sanitize** on upload
 - [x] **Replace attachment file** (keep ID — preserves ACF image fields)
 - [x] **Link checker** across a post type (capped)
@@ -200,7 +200,7 @@ Makes sessions smoother or safer; not daily blockers.
 - [x] **`set post_author`** + safe `list_users` for assignment
 - [x] **Theme templates list** — `list_theme_templates` (+ `describe_post_type`)
 - [x] **Plugin capability matrix** — which SEO/redirect tools unlock for this site
-- [ ] **CPT deep inventory / permalinks clash list**
+- [x] **CPT deep inventory / permalinks clash** — `inventory_post_types` / `permalink_clash_report`
 
 ### Agent collaboration & recovery
 
@@ -209,9 +209,6 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **Agent-queryable history** — `history_list` / `diff` / `apply` dry_run
 - [ ] **Live change toasts** in wp-admin while the agent works
 - [ ] **HITL approval queue** for destructive tools (beyond Force draft)
-- [ ] **Standard vs Trusted** connection levels (fail-closed when raising)
-- [ ] **Per-grant tool allowlists** on OAuth consent (beyond read/write)
-- [ ] **Drafts-only site mode** (stricter than Force draft)
 - [ ] **Write-and-confirm outcome enum** on all mutations
 - [ ] **Site Context AGENTS.md + CHANGELOG.md** for chat-only agents (complements repo skill)
 - [x] **Prompts / resources** — Recipes tab + MCP `seo_pass` / `launch_prep` / `acf_gap_check` / `content_inventory` / `session_plan`
@@ -222,9 +219,8 @@ Makes sessions smoother or safer; not daily blockers.
 - [x] **`MT_MCP_PUBLIC_BASE`** for tunnel/local OAuth advertise URL
 - [ ] **Alternate discovery URL** when hosts block `/.well-known/`
 - [ ] **Output / Auth-header / Sucuri diagnostics** folded into Doctor
-- [ ] **Pending OAuth client approval** queue (extra lock on prod Maptician-class sites)
 - [x] **Plugin / core update sessions** — list → confirm → one-at-a-time + zip rollback + smoke checks (Allow MCP updates)
-- [ ] **Allowlisted cache flush** (PHP, no shell)
+- [x] **Allowlisted cache flush** — `flush_caches` (object_cache / rewrites / Rocket / LiteSpeed / W3TC / Autoptimize / Elementor)
 - [ ] **Meta-key allowlist** for any generic meta writes
 - [ ] **High-risk second lock** — permanent delete / redirect wipe need extra toggle
 - [ ] **Alert emails without payload** on denials/errors

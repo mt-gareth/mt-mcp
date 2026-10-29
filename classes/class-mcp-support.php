@@ -108,6 +108,7 @@ class McpSupport {
 		'run_smoke_checks',
 		'finish_update_session',
 		'confirm_update_ok',
+		'flush_caches',
 	);
 
 	/**
@@ -156,6 +157,8 @@ class McpSupport {
 		$map = array(
 			'get_site_context'       => 'content',
 			'list_post_types'        => 'content',
+			'inventory_post_types'   => 'content',
+			'permalink_clash_report' => 'content',
 			'list_posts'             => 'content',
 			'search_posts'           => 'content',
 			'get_post'               => 'content',
@@ -178,12 +181,15 @@ class McpSupport {
 			'bulk_update_yoast'      => 'seo',
 			'bulk_update_seo'        => 'seo',
 			'seo_audit'              => 'seo',
+			'get_seo_social'         => 'seo',
+			'seo_social_audit'       => 'seo',
 			'suggest_internal_links' => 'seo',
 			'validate_schema_ld'     => 'seo',
 			'sitemap_diff'           => 'seo',
 			'list_media'             => 'media',
 			'get_media'              => 'media',
 			'update_media'           => 'media',
+			'find_media_by_hash'     => 'media',
 			'upload_media'           => 'media',
 			'bulk_fix_media_alt'    => 'media',
 			'media_alt_report'       => 'media',
@@ -226,6 +232,7 @@ class McpSupport {
 			'find_replace'           => 'content',
 			'bulk_update_posts'      => 'content',
 			'list_users'             => 'content',
+			'flush_caches'           => 'system',
 			'get_site_health'        => 'system',
 			'connection_doctor'      => 'system',
 			'manage_connections'     => 'system',

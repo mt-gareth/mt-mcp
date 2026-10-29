@@ -469,6 +469,17 @@ TXT;
 				array( 'readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false )
 			),
 			array(
+				'name'        => 'flush_caches',
+				'description' => 'Allowlisted cache flush (object_cache, rewrites, wp_rocket, litespeed, w3tc, autoptimize, elementor). No shell. Supports dry_run. Requires manage_options.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'targets' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'dry_run' => array( 'type' => 'boolean' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'get_site_health',
 				'description' => 'WordPress Site Health snapshot: critical/recommended/good tests, core/plugin/theme update counts, PHP/WP debug flags.',
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
@@ -748,6 +759,26 @@ TXT;
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 			),
 			array(
+				'name'        => 'inventory_post_types',
+				'description' => 'Deep CPT inventory: rewrite, archive, supports, taxonomies, status counts. Optional include_private.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'include_private' => array( 'type' => 'boolean' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'permalink_clash_report',
+				'description' => 'Find duplicate post_name slugs across posts/CPTs that can break permalinks or imports.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit' => array( 'type' => 'integer' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'list_posts',
 				'description' => 'List posts of one post type (lightweight summaries). Use get_post for full detail.',
 				'inputSchema' => array(
@@ -842,6 +873,29 @@ TXT;
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array( 'page' => array( 'type' => 'string' ) ),
+				),
+			),
+			array(
+				'name'        => 'get_seo_social',
+				'description' => 'Read OG/Twitter/canonical/primary category/breadcrumb gaps for one post (Yoast fields when present).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'  => array( 'type' => 'integer' ),
+						'url' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'seo_social_audit',
+				'description' => 'Scan a post type for missing OG/Twitter/canonical/primary-category social SEO gaps. Capped.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'post_type' => array( 'type' => 'string' ),
+						'status'    => array( 'type' => 'string' ),
+						'limit'     => array( 'type' => 'integer' ),
+					),
 				),
 			),
 			array(
@@ -1186,8 +1240,20 @@ TXT;
 				),
 			),
 			array(
+				'name'        => 'find_media_by_hash',
+				'description' => 'Find an existing attachment by SHA-256 (or hash of data_base64 / source_url). Use before upload_media to avoid duplicates.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'sha256'       => array( 'type' => 'string' ),
+						'data_base64'  => array( 'type' => 'string' ),
+						'source_url'   => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'upload_media',
-				'description' => 'Upload a new attachment from url or data_base64 (+ filename). URL sideloads: https only, no redirects, refuse private IPs, require alt. Optional title, caption, description, parent_post_id. Supports dry_run. Max 15MB.',
+				'description' => 'Upload a new attachment from url or data_base64 (+ filename). Reuses existing attachment when SHA-256 matches (_mt_mcp_sha256) unless force_new. URL sideloads: https only, no redirects, refuse private IPs, require alt. Optional title, caption, description, parent_post_id. Supports dry_run. Max 15MB.',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -1199,6 +1265,7 @@ TXT;
 						'caption'         => array( 'type' => 'string' ),
 						'description'     => array( 'type' => 'string' ),
 						'parent_post_id'  => array( 'type' => 'integer' ),
+						'force_new'       => array( 'type' => 'boolean' ),
 						'dry_run'         => array( 'type' => 'boolean' ),
 					),
 				),
@@ -1741,6 +1808,8 @@ TXT;
 		$map = array(
 			'get_site_context'      => 'get_site_context',
 			'list_post_types'       => 'list_post_types',
+			'inventory_post_types'  => 'inventory_post_types',
+			'permalink_clash_report'=> 'permalink_clash_report',
 			'list_posts'            => 'list_posts',
 			'search_posts'          => 'search_posts',
 			'get_post'              => 'get_post',
@@ -1796,9 +1865,12 @@ TXT;
 			'update_options_page'   => 'update_options_page',
 			'bulk_update_yoast'     => 'bulk_update_yoast',
 			'seo_audit'             => 'seo_audit',
+			'get_seo_social'        => 'get_seo_social',
+			'seo_social_audit'      => 'seo_social_audit',
 			'list_media'            => 'list_media',
 			'get_media'             => 'get_media',
 			'update_media'          => 'update_media',
+			'find_media_by_hash'     => 'find_media_by_hash',
 			'upload_media'          => 'upload_media',
 			'list_menus'            => 'list_menus',
 			'get_menu'              => 'get_menu',
@@ -1828,6 +1900,7 @@ TXT;
 			'bulk_fix_media_alt'  => 'bulk_fix_media_alt',
 			'schedule_post'          => 'schedule_post',
 			'notify_write_batch'     => 'notify_write_batch',
+			'flush_caches'           => 'flush_caches',
 			'get_site_health'        => 'get_site_health',
 			'generate_cursor_skill'  => 'generate_cursor_skill',
 		);
