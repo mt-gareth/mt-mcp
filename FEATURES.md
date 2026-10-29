@@ -120,7 +120,7 @@ Only **open** work. Pull from Maybe only when a real client job needs it.
 | **1.3.9–.11** | SEO social, CPT inventory/clash, flush_caches, media SHA, soft-404, SVG sanitize, meta allowlist, alt discovery paths, AGENTS.md/CHANGELOG |
 | **1.3.12** | High-risk lock; `menu://` + `media://missing-alt`; doctor auth/WAF probe |
 | **1.3.13** | Client rollout recipe/`client_rollout`; expanded cookbook; `get_usage_insights` + Activity aggregates |
-| **1.3.14** | **Security lock** + WP.org packaging; connection labels (`set_connection_label`); Overview UI polish (Copy URL, labeled grants) |
+| **1.3.14** | **Security lock** + packaging; connection labels; Overview polish; GitHub Releases updater |
 
 ---
 
