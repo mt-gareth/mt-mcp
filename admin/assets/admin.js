@@ -171,4 +171,68 @@
 		});
 		syncWebhookDirty();
 	}
+
+	/* Recipes cookbook: search + category + read/write filters */
+	(function initRecipes() {
+		var grid = document.getElementById('mt-mcp-recipes-grid');
+		if (!grid) return;
+		var q = document.getElementById('mt-mcp-recipes-q');
+		var catRoot = document.getElementById('mt-mcp-recipes-cats');
+		var writeRoot = document.getElementById('mt-mcp-recipes-writes');
+		var countEl = document.getElementById('mt-mcp-recipes-count');
+		var emptyEl = document.getElementById('mt-mcp-recipes-empty');
+		var cat = '';
+		var writes = '';
+
+		function setChipGroup(root, attr, value) {
+			if (!root) return;
+			root.querySelectorAll('.mt-mcp-chip').forEach(function (btn) {
+				btn.classList.toggle('is-active', (btn.getAttribute(attr) || '') === value);
+			});
+		}
+
+		function apply() {
+			var query = (q && q.value ? q.value : '').trim().toLowerCase();
+			var cards = grid.querySelectorAll('.mt-mcp-recipe');
+			var shown = 0;
+			cards.forEach(function (card) {
+				var okCat = !cat || card.getAttribute('data-cat') === cat;
+				var okWrite = writes === '' || card.getAttribute('data-writes') === writes;
+				var hay = card.getAttribute('data-search') || '';
+				var okQ = !query || hay.indexOf(query) !== -1;
+				var show = okCat && okWrite && okQ;
+				card.hidden = !show;
+				if (show) shown++;
+			});
+			if (countEl) {
+				countEl.textContent = shown + ' recipe' + (shown === 1 ? '' : 's');
+			}
+			if (emptyEl) {
+				emptyEl.hidden = shown > 0;
+			}
+		}
+
+		if (catRoot) {
+			catRoot.addEventListener('click', function (e) {
+				var btn = e.target.closest('.mt-mcp-chip');
+				if (!btn) return;
+				cat = btn.getAttribute('data-cat') || '';
+				setChipGroup(catRoot, 'data-cat', cat);
+				apply();
+			});
+		}
+		if (writeRoot) {
+			writeRoot.addEventListener('click', function (e) {
+				var btn = e.target.closest('.mt-mcp-chip');
+				if (!btn) return;
+				writes = btn.getAttribute('data-writes') || '';
+				setChipGroup(writeRoot, 'data-writes', writes);
+				apply();
+			});
+		}
+		if (q) {
+			q.addEventListener('input', apply);
+		}
+		apply();
+	})();
 })();

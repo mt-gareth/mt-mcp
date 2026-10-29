@@ -179,6 +179,7 @@ class Admin {
 		$tabs = array(
 			'overview'   => 'Overview',
 			'settings'   => 'Settings',
+			'recipes'    => 'Recipes',
 			'changes'    => 'Changes',
 			'activity'   => 'Activity',
 			'playground' => 'Playground',
@@ -223,6 +224,9 @@ class Admin {
 				switch ( $tab ) {
 					case 'settings':
 						$this->render_settings();
+						break;
+					case 'recipes':
+						$this->render_recipes();
 						break;
 					case 'changes':
 						$this->render_changes();
@@ -626,6 +630,83 @@ class Admin {
 			</details>
 		</div>
 		<?php
+	}
+
+	private function render_recipes() {
+		$recipes    = McpRecipes::all();
+		$categories = McpRecipes::categories();
+		?>
+		<section class="mt-mcp-card mt-mcp-recipes-intro">
+			<h2>Recipes</h2>
+			<p class="mt-mcp-help">Copy a prompt into Cursor or Claude after this site is connected via MCP. Recipes use our tools (ACF, Yoast, menus, media, staging→prod) — not Woo or page builders. Prefer dry-run before writes; respect Site Brief and write gates.</p>
+			<div class="mt-mcp-recipes-toolbar">
+				<label class="mt-mcp-recipes-search">
+					<span class="screen-reader-text">Search recipes</span>
+					<input type="search" id="mt-mcp-recipes-q" placeholder="Search recipes…" autocomplete="off" />
+				</label>
+				<div class="mt-mcp-recipes-filters" id="mt-mcp-recipes-cats" role="group" aria-label="Categories">
+					<button type="button" class="mt-mcp-chip is-active" data-cat="">All</button>
+					<?php foreach ( $categories as $slug => $label ) : ?>
+						<button type="button" class="mt-mcp-chip" data-cat="<?php echo esc_attr( $slug ); ?>"><?php echo esc_html( $label ); ?></button>
+					<?php endforeach; ?>
+				</div>
+				<div class="mt-mcp-recipes-filters" id="mt-mcp-recipes-writes" role="group" aria-label="Write mode">
+					<button type="button" class="mt-mcp-chip is-active" data-writes="">Any</button>
+					<button type="button" class="mt-mcp-chip" data-writes="0">Read only</button>
+					<button type="button" class="mt-mcp-chip" data-writes="1">Writes</button>
+				</div>
+			</div>
+			<p class="mt-mcp-help mt-mcp-recipes-count" id="mt-mcp-recipes-count" aria-live="polite"></p>
+		</section>
+
+		<div class="mt-mcp-recipes-grid" id="mt-mcp-recipes-grid">
+			<?php foreach ( $recipes as $recipe ) :
+				$id    = isset( $recipe['id'] ) ? $recipe['id'] : '';
+				$cat   = isset( $recipe['category'] ) ? $recipe['category'] : '';
+				$cat_l = isset( $categories[ $cat ] ) ? $categories[ $cat ] : $cat;
+				$writes = ! empty( $recipe['writes'] ) ? '1' : '0';
+				$short  = McpRecipes::short_prompt( $recipe );
+				$prompt = isset( $recipe['prompt'] ) ? $recipe['prompt'] : '';
+				$search = strtolower( $recipe['title'] . ' ' . $recipe['summary'] . ' ' . $cat_l . ' ' . implode( ' ', isset( $recipe['tags'] ) ? (array) $recipe['tags'] : array() ) );
+				?>
+				<article class="mt-mcp-recipe"
+					data-id="<?php echo esc_attr( $id ); ?>"
+					data-cat="<?php echo esc_attr( $cat ); ?>"
+					data-writes="<?php echo esc_attr( $writes ); ?>"
+					data-search="<?php echo esc_attr( $search ); ?>">
+					<header class="mt-mcp-recipe-head">
+						<div class="mt-mcp-recipe-meta">
+							<span class="mt-mcp-recipe-cat"><?php echo esc_html( $cat_l ); ?></span>
+							<?php if ( '1' === $writes ) : ?>
+								<span class="mt-mcp-recipe-badge is-write">Writes</span>
+							<?php else : ?>
+								<span class="mt-mcp-recipe-badge is-read">Read only</span>
+							<?php endif; ?>
+							<span class="mt-mcp-recipe-badge"><?php echo esc_html( ucfirst( (string) $recipe['difficulty'] ) ); ?></span>
+							<span class="mt-mcp-recipe-badge">~<?php echo (int) $recipe['minutes']; ?> min</span>
+						</div>
+						<h3 class="mt-mcp-recipe-title"><?php echo esc_html( $recipe['title'] ); ?></h3>
+						<p class="mt-mcp-recipe-summary"><?php echo esc_html( $recipe['summary'] ); ?></p>
+					</header>
+					<details class="mt-mcp-recipe-details">
+						<summary>Show prompt</summary>
+						<div class="mt-mcp-recipe-prompt-wrap">
+							<textarea class="mt-mcp-recipe-prompt" id="mt-mcp-prompt-<?php echo esc_attr( $id ); ?>" readonly rows="12"><?php echo esc_textarea( $prompt ); ?></textarea>
+							<textarea class="mt-mcp-recipe-short" id="mt-mcp-short-<?php echo esc_attr( $id ); ?>" readonly hidden><?php echo esc_textarea( $short ); ?></textarea>
+							<div class="mt-mcp-recipe-actions">
+								<button type="button" class="button button-primary mt-mcp-copy" data-copy-target="#mt-mcp-prompt-<?php echo esc_attr( $id ); ?>">Copy prompt</button>
+								<button type="button" class="button mt-mcp-copy" data-copy-target="#mt-mcp-short-<?php echo esc_attr( $id ); ?>">Copy short</button>
+							</div>
+							<p class="mt-mcp-help">Short = “already connected” one-liner. Replace bracketed placeholders before sending.</p>
+						</div>
+					</details>
+				</article>
+			<?php endforeach; ?>
+		</div>
+		<p class="mt-mcp-help" id="mt-mcp-recipes-empty" hidden>No recipes match. Clear search or filters.</p>
+		<?php
+		// Widen wrap for this tab.
+		echo '<script>document.querySelector(".mt-mcp-wrap") && document.querySelector(".mt-mcp-wrap").classList.add("mt-mcp-wrap--wide");</script>';
 	}
 
 	private function render_changes() {

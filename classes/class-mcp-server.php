@@ -448,7 +448,7 @@ Writes are currently {$writes}. Use get_site_health for install health; list_rev
 
 {$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
 
-Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep) for common review workflows.
+Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep, session_plan) or copy Recipes from Settings → MT MCP → Recipes.
 Use resources site://context, site://sitemap, and acf://schema/{post_type} for quick context pulls.
 TXT;
 	}
@@ -1813,84 +1813,45 @@ TXT;
 	}
 
 	private function prompt_definitions() {
-		return array(
-			array(
-				'name'        => 'seo_pass',
-				'description' => 'Run an SEO review and propose Yoast title/description updates.',
-				'arguments'   => array(
-					array( 'name' => 'post_type', 'description' => 'Post type to audit (default page)', 'required' => false ),
-				),
-			),
-			array(
-				'name'        => 'content_inventory',
-				'description' => 'Inventory published content and flag incomplete pages.',
-				'arguments'   => array(
-					array( 'name' => 'post_type', 'description' => 'Post type (default page)', 'required' => false ),
-				),
-			),
-			array(
-				'name'        => 'acf_gap_check',
-				'description' => 'Compare ACF schema against live posts and list empty/missing fields.',
-				'arguments'   => array(
-					array( 'name' => 'post_type', 'description' => 'Post type to check', 'required' => true ),
-				),
-			),
-			array(
-				'name'        => 'launch_prep',
-				'description' => 'Pre-launch checklist: site context, menus, redirects, SEO audit, content review.',
-				'arguments'   => array(),
-			),
-			array(
-				'name'        => 'session_plan',
-				'description' => 'Propose a tool sequence before any writes. Use at the start of a change request.',
-				'arguments'   => array(
-					array( 'name' => 'goal', 'description' => 'What the user wants done', 'required' => true ),
-				),
-			),
-		);
+		$list = McpRecipes::as_mcp_prompt_list();
+		return $list ? $list : array();
 	}
 
 	private function rpc_prompts_get( $params ) {
 		$name = isset( $params['name'] ) ? $params['name'] : '';
 		$arguments = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
 		$post_type = isset( $arguments['post_type'] ) ? $arguments['post_type'] : 'page';
-		$goal      = isset( $arguments['goal'] ) ? $arguments['goal'] : '(unspecified goal)';
+		$goal      = isset( $arguments['goal'] ) ? $arguments['goal'] : '[describe what you want done]';
 
-		$prompts = array(
-			'seo_pass' => array(
-				'description' => 'SEO pass',
-				'text'        => "You are reviewing SEO on this WordPress site.\n1. Call get_site_context.\n2. Call seo_audit with post_type=\"{$post_type}\".\n3. For the worst offenders, get_post (include:[\"core\",\"yoast\"]) and draft improved title/metadesc/focuskw.\n4. Preview with bulk_update_yoast dry_run:true, then apply if approved.\nStay within Yoast length guidelines (title ≤60, metadesc ≤160).",
-			),
-			'content_inventory' => array(
-				'description' => 'Content inventory',
-				'text'        => "Inventory content for post_type=\"{$post_type}\".\n1. get_site_context\n2. content_review with check_acf:true\n3. Summarize counts and list the top incomplete URLs with their flags.\nDo not write anything unless asked.",
-			),
-			'acf_gap_check' => array(
-				'description' => 'ACF gap check',
-				'text'        => "Check ACF completeness for post_type=\"{$post_type}\".\n1. get_acf_schema for that post type\n2. list_posts / search_posts across published items\n3. get_post with include:[\"acf\"] (use only_acf_fields when payloads are large)\n4. Report empty/missing fields per URL. Do not write unless asked.",
-			),
-			'launch_prep' => array(
-				'description' => 'Launch prep',
-				'text'        => "Run a pre-launch review:\n1. get_site_context\n2. list_menus + get_menu for each location\n3. list_redirects\n4. seo_audit on page and post\n5. content_review on page with check_acf:true\n6. Produce a launch-readiness report with blockers vs nice-to-haves. No writes unless asked.",
-			),
-			'session_plan' => array(
-				'description' => 'Session plan',
-				'text'        => "Goal: {$goal}\nBefore writing anything:\n1. get_site_context (confirm environment + auth user)\n2. List the exact tools you will call, in order, marking each read vs write\n3. Identify dry_run checkpoints\n4. Ask for confirmation before the first write tool\nDo not mutate content until the plan is approved.",
-			),
+		$id_map = array(
+			'seo_pass'          => 'seo-pass',
+			'content_inventory' => 'content-inventory',
+			'acf_gap_check'     => 'acf-gap-check',
+			'launch_prep'       => 'launch-prep',
+			'session_plan'      => 'session-plan',
 		);
-
-		if ( ! isset( $prompts[ $name ] ) ) {
+		if ( ! isset( $id_map[ $name ] ) ) {
 			throw new \Exception( 'Unknown prompt: ' . $name );
 		}
+		$recipe = McpRecipes::get( $id_map[ $name ] );
+		if ( ! $recipe ) {
+			throw new \Exception( 'Unknown prompt: ' . $name );
+		}
+		$text = isset( $recipe['prompt'] ) ? $recipe['prompt'] : '';
+		$text = str_replace(
+			array( 'post_type="[page or CPT]"', 'post_type="[page or post]"', 'post_type="[page]"', 'post_type="[CPT]"', '[describe what you want done]' ),
+			array( 'post_type="' . $post_type . '"', 'post_type="' . $post_type . '"', 'post_type="' . $post_type . '"', 'post_type="' . $post_type . '"', $goal ),
+			$text
+		);
 
 		return array(
-			'description' => $prompts[ $name ]['description'],
+			'description' => isset( $recipe['summary'] ) ? $recipe['summary'] : $name,
 			'messages'    => array(
 				array(
 					'role'    => 'user',
 					'content' => array(
 						'type' => 'text',
-						'text' => $prompts[ $name ]['text'],
+						'text' => $text,
 					),
 				),
 			),

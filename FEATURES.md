@@ -63,6 +63,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] `unused_media_report` + `MT_MCP_PUBLIC_BASE` / `mt_mcp_public_base` for tunnel OAuth ads
 
+### Shipped in 1.3.6
+
+- [x] Recipes admin tab (search/filter cookbook + copy prompts) shared with MCP `prompts/*`
+
 ---
 
 ## Capability map (what works today)
@@ -202,7 +206,7 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **Drafts-only site mode** (stricter than Force draft)
 - [ ] **Write-and-confirm outcome enum** on all mutations
 - [ ] **Site Context AGENTS.md + CHANGELOG.md** for chat-only agents (complements repo skill)
-- [ ] **Prompts / resources** — `seo_pass`, `launch_prep`, `acf_gap_check` wired and documented
+- [x] **Prompts / resources** — Recipes tab + MCP `seo_pass` / `launch_prep` / `acf_gap_check` / `content_inventory` / `session_plan`
 - [ ] **Richer MCP resources** — `acf://`, `menu://`, `media://missing-alt`
 
 ### Ops & hosting

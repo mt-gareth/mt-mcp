@@ -3,7 +3,7 @@
  * Plugin Name: MT MCP
  * Plugin URI:  https://motiontactic.com
  * Description: Standalone Model Context Protocol (MCP) server for WordPress. OAuth 2.1 / Application Password user login — no shared API keys.
- * Version:     1.3.5
+ * Version:     1.3.6
  * Author:      Motion Tactic
  * Author URI:  https://motiontactic.com
  * Text Domain: mt-mcp
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'MT_MCP_VERSION', '1.3.5' );
+define( 'MT_MCP_VERSION', '1.3.6' );
 define( 'MT_MCP_FILE', __FILE__ );
 define( 'MT_MCP_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MT_MCP_URL', plugin_dir_url( __FILE__ ) );
@@ -31,6 +31,7 @@ require_once MT_MCP_PATH . 'classes/class-mcp-transfer.php';
 require_once MT_MCP_PATH . 'classes/class-mcp-tool-handlers.php';
 require_once MT_MCP_PATH . 'classes/class-mcp-server.php';
 require_once MT_MCP_PATH . 'classes/class-mcp-public.php';
+require_once MT_MCP_PATH . 'includes/class-mcp-recipes.php';
 require_once MT_MCP_PATH . 'admin/class-admin.php';
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
 	require_once MT_MCP_PATH . 'includes/class-mcp-cli.php';
