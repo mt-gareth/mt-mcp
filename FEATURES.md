@@ -75,6 +75,14 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] Dead-man auto-rollback MU-plugin + `wp --skip-plugins mt-mcp-guard rollback` / `confirm_update_ok`
 
+### Shipped in 1.3.9
+
+- [x] `get_seo_social` / `seo_social_audit`, `inventory_post_types` / `permalink_clash_report`, `flush_caches`, media SHA fingerprint reuse
+
+### Shipped in 1.3.10
+
+- [x] `sitemap_diff` soft-404 body checks + sitemap source; SVG upload sanitize (`allow_svg` + enshrined/svg-sanitize)
+
 ---
 
 ## Capability map (what works today)
@@ -190,10 +198,10 @@ Makes sessions smoother or safer; not daily blockers.
 
 - [x] **Public HTML verification** after content edits (`diff_public_html`)
 - [x] **OG / Twitter / canonical / primary category / breadcrumb** — `get_seo_social` / `seo_social_audit`
-- [ ] **Sitemap crawl with soft-404 body checks** (beyond HEAD)
+- [x] **Sitemap crawl with soft-404 body checks** — `sitemap_diff` `check_body`/`source=sitemap`
 - [x] **Unused media report** — `unused_media_report`
 - [x] **Media fingerprint** — `find_media_by_hash` + `upload_media` SHA reuse (`force_new` to duplicate)
-- [ ] **SVG sanitize** on upload
+- [x] **SVG sanitize** on upload — `allow_svg` + bundled `enshrined/svg-sanitize`
 - [x] **Replace attachment file** (keep ID — preserves ACF image fields)
 - [x] **Link checker** across a post type (capped)
 - [x] **Bulk status / author / parent** — `bulk_update_posts`

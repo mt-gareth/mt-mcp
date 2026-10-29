@@ -1,0 +1,12 @@
+{
+    "name": "motiontactic/mt-mcp",
+    "description": "MT MCP WordPress plugin",
+    "license": "proprietary",
+    "require": {
+        "php": ">=7.4",
+        "enshrined/svg-sanitize": "^1.1.1"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

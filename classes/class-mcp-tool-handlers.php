@@ -2496,6 +2496,24 @@ class McpToolHandlers {
 			file_put_contents( $tmp, $bytes ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 		}
 
+		$mime_guess = '';
+		if ( function_exists( 'mime_content_type' ) ) {
+			$mime_guess = (string) @mime_content_type( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		}
+		$bytes_head = (string) file_get_contents( $tmp, false, null, 0, 4096 );
+		if ( McpSupport::looks_like_svg( $filename, $mime_guess, $bytes_head ) ) {
+			if ( empty( $args['allow_svg'] ) ) {
+				@unlink( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+				throw new \Exception( 'SVG uploads require allow_svg:true (content is sanitized with enshrined/svg-sanitize).' );
+			}
+			$raw = (string) file_get_contents( $tmp );
+			$clean = McpSupport::sanitize_svg_bytes( $raw );
+			file_put_contents( $tmp, $clean ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			if ( ! preg_match( '/\.svg$/i', $filename ) ) {
+				$filename = pathinfo( $filename, PATHINFO_FILENAME ) . '.svg';
+			}
+		}
+
 		$sha = hash_file( 'sha256', $tmp );
 		if ( $sha && empty( $args['force_new'] ) ) {
 			$existing = self::find_attachment_by_sha( $sha );
@@ -2513,6 +2531,29 @@ class McpToolHandlers {
 			'name'     => sanitize_file_name( $filename ),
 			'tmp_name' => $tmp,
 		);
+
+		$svg_upload = McpSupport::looks_like_svg( $filename, $mime_guess, isset( $bytes_head ) ? $bytes_head : '' );
+		$mime_filter = null;
+		$ext_filter  = null;
+		if ( $svg_upload ) {
+			$mime_filter = static function ( $mimes ) {
+				$mimes['svg']  = 'image/svg+xml';
+				$mimes['svgz'] = 'image/svg+xml';
+				return $mimes;
+			};
+			$ext_filter = static function ( $data, $file, $filename_arg, $mimes ) {
+				$ext = strtolower( pathinfo( $filename_arg, PATHINFO_EXTENSION ) );
+				if ( in_array( $ext, array( 'svg', 'svgz' ), true ) ) {
+					$data['ext']  = 'svg';
+					$data['type'] = 'image/svg+xml';
+					$data['proper_filename'] = $filename_arg;
+				}
+				return $data;
+			};
+			add_filter( 'upload_mimes', $mime_filter );
+			add_filter( 'wp_check_filetype_and_ext', $ext_filter, 10, 4 );
+		}
+
 		$id = media_handle_sideload(
 			$file_array,
 			isset( $args['parent_post_id'] ) ? (int) $args['parent_post_id'] : 0,
@@ -2523,6 +2564,12 @@ class McpToolHandlers {
 				'post_content' => isset( $args['description'] ) ? $args['description'] : '',
 			)
 		);
+		if ( $mime_filter ) {
+			remove_filter( 'upload_mimes', $mime_filter );
+		}
+		if ( $ext_filter ) {
+			remove_filter( 'wp_check_filetype_and_ext', $ext_filter, 10 );
+		}
 		if ( is_wp_error( $id ) ) {
 			@unlink( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 			throw new \Exception( $id->get_error_message() );
@@ -2921,24 +2968,118 @@ MD;
 	}
 
 	public function sitemap_diff( $args = array() ) {
-		$limit = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 40;
-		$types = get_post_types( array( 'public' => true ), 'names' );
-		$query = new \WP_Query(
-			array(
-				'post_type'      => array_values( $types ),
-				'post_status'    => 'publish',
-				'posts_per_page' => $limit,
-				'fields'         => 'ids',
-				'no_found_rows'  => false,
-				'orderby'        => 'modified',
-				'order'          => 'DESC',
-			)
-		);
+		$limit       = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 40;
+		$check_body  = ! empty( $args['check_body'] ) || ! empty( $args['soft_404'] );
+		$source      = isset( $args['source'] ) ? sanitize_key( $args['source'] ) : 'posts';
+		$urls        = array();
+		$total       = 0;
+
+		if ( 'sitemap' === $source ) {
+			$sitemap_url = ! empty( $args['sitemap_url'] ) ? esc_url_raw( $args['sitemap_url'] ) : '';
+			$fetched_body = '';
+			if ( ! $sitemap_url ) {
+				$candidates = array(
+					home_url( '/sitemap_index.xml' ),
+					home_url( '/wp-sitemap.xml' ),
+					home_url( '/sitemap.xml' ),
+				);
+				foreach ( $candidates as $cand ) {
+					$probe = wp_remote_get(
+						$cand,
+						array(
+							'timeout'     => 8,
+							'redirection' => 2,
+							'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $cand ),
+						)
+					);
+					if ( ! is_wp_error( $probe ) && (int) wp_remote_retrieve_response_code( $probe ) < 400 ) {
+						$sitemap_url  = $cand;
+						$fetched_body = (string) wp_remote_retrieve_body( $probe );
+						$urls         = self::extract_sitemap_locs( $fetched_body, $limit * 3 );
+						if ( $urls ) {
+							break;
+						}
+					}
+				}
+			} else {
+				$probe = wp_remote_get(
+					$sitemap_url,
+					array(
+						'timeout'     => 8,
+						'redirection' => 2,
+						'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $sitemap_url ),
+					)
+				);
+				if ( is_wp_error( $probe ) ) {
+					throw new \Exception( $probe->get_error_message() );
+				}
+				$fetched_body = (string) wp_remote_retrieve_body( $probe );
+				$urls         = self::extract_sitemap_locs( $fetched_body, $limit * 3 );
+			}
+			// Expand index → child sitemaps when locs look like sitemap XMLs.
+			$looks_index = false;
+			foreach ( array_slice( $urls, 0, 5 ) as $u ) {
+				if ( preg_match( '/sitemap.*\.xml/i', $u ) ) {
+					$looks_index = true;
+					break;
+				}
+			}
+			if ( $looks_index ) {
+				$child_urls = array();
+				foreach ( array_slice( $urls, 0, 5 ) as $child ) {
+					if ( ! preg_match( '/\.xml(\.gz)?(\?|$)/i', $child ) ) {
+						continue;
+					}
+					$cprobe = wp_remote_get(
+						$child,
+						array(
+							'timeout'     => 8,
+							'redirection' => 2,
+							'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $child ),
+						)
+					);
+					if ( is_wp_error( $cprobe ) || (int) wp_remote_retrieve_response_code( $cprobe ) >= 400 ) {
+						continue;
+					}
+					$child_urls = array_merge( $child_urls, self::extract_sitemap_locs( (string) wp_remote_retrieve_body( $cprobe ), $limit ) );
+					if ( count( $child_urls ) >= $limit ) {
+						break;
+					}
+				}
+				if ( $child_urls ) {
+					$urls = $child_urls;
+				}
+			}
+			$urls  = array_values( array_unique( array_slice( $urls, 0, $limit ) ) );
+			$total = count( $urls );
+		} else {
+			$types = get_post_types( array( 'public' => true ), 'names' );
+			$query = new \WP_Query(
+				array(
+					'post_type'      => array_values( $types ),
+					'post_status'    => 'publish',
+					'posts_per_page' => $limit,
+					'fields'         => 'ids',
+					'no_found_rows'  => false,
+					'orderby'        => 'modified',
+					'order'          => 'DESC',
+				)
+			);
+			$total = (int) $query->found_posts;
+			foreach ( $query->posts as $id ) {
+				$url = get_permalink( $id );
+				if ( $url ) {
+					$urls[] = array( 'id' => (int) $id, 'url' => $url );
+				}
+			}
+		}
+
 		$issues  = array();
 		$checked = 0;
 		$ssl     = null;
-		foreach ( $query->posts as $id ) {
-			$url = get_permalink( $id );
+		foreach ( $urls as $entry ) {
+			$id  = is_array( $entry ) ? ( isset( $entry['id'] ) ? (int) $entry['id'] : 0 ) : 0;
+			$url = is_array( $entry ) ? $entry['url'] : $entry;
 			if ( ! $url ) {
 				continue;
 			}
@@ -2946,10 +3087,12 @@ MD;
 				$ssl = apply_filters( 'mt_mcp_sslverify', true, $url );
 			}
 			$checked++;
-			$response = wp_remote_head(
+			$method   = $check_body ? 'GET' : 'HEAD';
+			$response = wp_remote_request(
 				$url,
 				array(
-					'timeout'     => 3,
+					'method'      => $method,
+					'timeout'     => $check_body ? 8 : 3,
 					'redirection' => 0,
 					'sslverify'   => $ssl,
 				)
@@ -2964,6 +3107,12 @@ MD;
 				$issues[] = array( 'id' => $id, 'url' => $url, 'issue' => 'http_' . $code );
 			} elseif ( $code >= 300 && $loc ) {
 				$issues[] = array( 'id' => $id, 'url' => $url, 'issue' => 'redirect', 'location' => $loc, 'code' => $code );
+			} elseif ( $check_body && $code >= 200 && $code < 300 ) {
+				$body = (string) wp_remote_retrieve_body( $response );
+				$soft = self::detect_soft_404( $body );
+				if ( $soft ) {
+					$issues[] = array( 'id' => $id, 'url' => $url, 'issue' => 'soft_404', 'signal' => $soft, 'code' => $code );
+				}
 			}
 			if ( count( $issues ) >= 50 ) {
 				break;
@@ -2971,12 +3120,82 @@ MD;
 		}
 		return array(
 			'checked'     => $checked,
-			'total'       => (int) $query->found_posts,
+			'total'       => $total,
 			'limit'       => $limit,
+			'source'      => $source,
+			'check_body'  => $check_body,
 			'issue_count' => count( $issues ),
 			'issues'      => $issues,
-			'truncated'   => $query->found_posts > $checked || count( $issues ) >= 50,
+			'truncated'   => $total > $checked || count( $issues ) >= 50,
 		);
+	}
+
+	/**
+	 * @param string $xml Sitemap XML.
+	 * @param int    $limit Max locs.
+	 * @return string[]
+	 */
+	private static function extract_sitemap_locs( $xml, $limit = 40 ) {
+		$locs = array();
+		if ( preg_match_all( '/<loc>\s*([^<]+)\s*<\/loc>/i', (string) $xml, $m ) ) {
+			foreach ( $m[1] as $loc ) {
+				$loc = esc_url_raw( trim( html_entity_decode( $loc, ENT_QUOTES | ENT_XML1, 'UTF-8' ) ) );
+				if ( $loc ) {
+					$locs[] = $loc;
+				}
+				if ( count( $locs ) >= $limit ) {
+					break;
+				}
+			}
+		}
+		return $locs;
+	}
+
+	/**
+	 * Heuristic soft-404 detector for HTTP 200 bodies.
+	 *
+	 * @param string $body HTML body.
+	 * @return string|null Signal key or null.
+	 */
+	private static function detect_soft_404( $body ) {
+		if ( '' === $body ) {
+			return 'empty_body';
+		}
+		$title = '';
+		if ( preg_match( '/<title[^>]*>(.*?)<\/title>/is', $body, $m ) ) {
+			$title = strtolower( wp_strip_all_tags( $m[1] ) );
+		}
+		if ( $title && preg_match( '/\b404\b|not found|page not found|doesn\'t exist|does not exist/i', $title ) ) {
+			return 'title:' . substr( $title, 0, 80 );
+		}
+		$slice = $body;
+		if ( preg_match( '/<(main|article)[^>]*>([\s\S]{0,8000})<\/\1>/i', $body, $m ) ) {
+			$slice = $m[2];
+		}
+		$text = strtolower( wp_strip_all_tags( substr( $slice, 0, 12000 ) ) );
+		$text = preg_replace( '/\s+/', ' ', $text );
+		$phrases = array(
+			'page not found',
+			'page you were looking for doesn\'t exist',
+			'page you were looking for does not exist',
+			'page can\'t be found',
+			'page cannot be found',
+			'oops! that page can\'t be found',
+			'we can\'t find that page',
+			'we couldn\'t find',
+			'nothing was found at this location',
+			'error 404',
+			'404 error',
+		);
+		foreach ( $phrases as $phrase ) {
+			if ( false !== strpos( $text, $phrase ) ) {
+				return 'body:' . $phrase;
+			}
+		}
+		if ( strlen( $text ) < 80 && preg_match( '/\b404\b|not found/', $text ) ) {
+			return 'short_body_404';
+		}
+		return null;
 	}
 
 	public function bulk_fix_media_alt( $args ) {

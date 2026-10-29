@@ -1056,8 +1056,17 @@ TXT;
 			),
 			array(
 				'name'        => 'sitemap_diff',
-				'description' => 'HEAD-check published public URLs for 4xx / unexpected redirects. Returns capped issue list.',
-				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
+				'description' => 'Check published URLs (source=posts|sitemap) for 4xx/redirects. Pass check_body/soft_404 for GET + soft-404 heuristics. Optional sitemap_url, limit.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'source'      => array( 'type' => 'string', 'description' => 'posts|sitemap' ),
+						'sitemap_url' => array( 'type' => 'string' ),
+						'check_body'  => array( 'type' => 'boolean' ),
+						'soft_404'    => array( 'type' => 'boolean' ),
+						'limit'       => array( 'type' => 'integer' ),
+					),
+				),
 			),
 			array(
 				'name'        => 'export_posts',
@@ -1253,7 +1262,7 @@ TXT;
 			),
 			array(
 				'name'        => 'upload_media',
-				'description' => 'Upload a new attachment from url or data_base64 (+ filename). Reuses existing attachment when SHA-256 matches (_mt_mcp_sha256) unless force_new. URL sideloads: https only, no redirects, refuse private IPs, require alt. Optional title, caption, description, parent_post_id. Supports dry_run. Max 15MB.',
+				'description' => 'Upload a new attachment from url or data_base64 (+ filename). Reuses existing attachment when SHA-256 matches (_mt_mcp_sha256) unless force_new. SVG requires allow_svg (sanitized). URL sideloads: https only, no redirects, refuse private IPs, require alt. Optional title, caption, description, parent_post_id. Supports dry_run. Max 15MB.',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -1266,6 +1275,7 @@ TXT;
 						'description'     => array( 'type' => 'string' ),
 						'parent_post_id'  => array( 'type' => 'integer' ),
 						'force_new'       => array( 'type' => 'boolean' ),
+						'allow_svg'       => array( 'type' => 'boolean', 'description' => 'Required for SVG; content sanitized via enshrined/svg-sanitize' ),
 						'dry_run'         => array( 'type' => 'boolean' ),
 					),
 				),

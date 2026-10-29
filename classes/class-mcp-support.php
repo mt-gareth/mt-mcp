@@ -959,6 +959,52 @@ class McpSupport {
 	 * @throws \Exception When unsafe.
 	 * @return string Sanitized URL.
 	 */
+
+	/**
+	 * Sanitize SVG markup. Requires enshrined/svg-sanitize when available.
+	 *
+	 * @param string $svg Raw SVG bytes/string.
+	 * @return string Clean SVG.
+	 * @throws \Exception When sanitizer missing or SVG rejected.
+	 */
+	public static function sanitize_svg_bytes( $svg ) {
+		$svg = (string) $svg;
+		if ( '' === trim( $svg ) ) {
+			throw new \Exception( 'Empty SVG.' );
+		}
+		if ( ! class_exists( '\\enshrined\\svgSanitize\\Sanitizer' ) ) {
+			throw new \Exception( 'SVG uploads require enshrined/svg-sanitize (bundled under vendor/).' );
+		}
+		$sanitizer = new \enshrined\svgSanitize\Sanitizer();
+		$sanitizer->minify( true );
+		$clean = $sanitizer->sanitize( $svg );
+		if ( false === $clean || '' === trim( (string) $clean ) ) {
+			throw new \Exception( 'SVG failed sanitization (script/unsafe content stripped to empty).' );
+		}
+		return (string) $clean;
+	}
+
+	/**
+	 * True when filename or mime looks like SVG.
+	 */
+	public static function looks_like_svg( $filename = '', $mime = '', $bytes = '' ) {
+		$filename = strtolower( (string) $filename );
+		$mime     = strtolower( (string) $mime );
+		if ( $filename && preg_match( '/\\.svgz?$/', $filename ) ) {
+			return true;
+		}
+		if ( $mime && ( false !== strpos( $mime, 'svg' ) || 'image/svg+xml' === $mime ) ) {
+			return true;
+		}
+		$head = strtolower( ltrim( substr( (string) $bytes, 0, 256 ) ) );
+		if ( $head && ( 0 === strpos( $head, '<?xml' ) || 0 === strpos( $head, '<svg' ) || false !== strpos( $head, '<svg' ) ) ) {
+			if ( false !== strpos( $head, '<svg' ) || false !== strpos( strtolower( substr( (string) $bytes, 0, 2048 ) ), '<svg' ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public static function assert_safe_remote_url( $url ) {
 		$url = esc_url_raw( (string) $url );
 		if ( ! $url ) {

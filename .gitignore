@@ -8,7 +8,7 @@
 *.zip
 *.tar.gz
 node_modules/
-vendor/
+# vendor/ is committed — WordPress installs should not need Composer on the host
 .phpunit.result.cache
 .env
 .env.*
