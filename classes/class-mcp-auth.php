@@ -147,6 +147,9 @@ class McpAuth {
 			'get_options'              => 'manage_options',
 			'get_audit_log'            => 'manage_options',
 			'export_audit_log'         => 'manage_options',
+			'list_changes'             => 'edit_posts',
+			'get_change'               => 'edit_posts',
+			'undo_change'              => 'edit_posts',
 			'get_site_health'          => 'manage_options',
 			'notify_write_batch'       => 'edit_posts',
 		);

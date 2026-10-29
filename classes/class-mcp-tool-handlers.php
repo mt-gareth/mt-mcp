@@ -69,6 +69,8 @@ class McpToolHandlers {
 				'force_draft'    => McpSupport::force_draft_enabled(),
 				'site_brief'     => McpSupport::site_brief(),
 				'tool_groups'    => McpSupport::enabled_groups(),
+				'three_gates'    => McpSupport::three_gate_status(),
+				'undo_ttl_hours' => (int) ( McpSupport::UNDO_TTL_SECONDS / 3600 ),
 				'oauth'          => true,
 				'seo_providers'  => McpSeo::active_providers(),
 			),
@@ -3745,6 +3747,7 @@ MD;
 			'user_agents_to_allow' => array( 'python-httpx', 'Cursor', 'claude-user' ),
 		);
 
+		$gates = McpSupport::three_gate_status();
 		$checks[] = array(
 			'key'    => 'writes',
 			'ok'     => (bool) get_option( McpSupport::OPTION_ALLOW_WRITES ) && ! McpSupport::writes_paused(),
@@ -3754,6 +3757,12 @@ MD;
 				McpSupport::writes_paused() ? 'yes' : 'no',
 				McpSupport::force_draft_enabled() ? 'yes' : 'no'
 			),
+		);
+		$checks[] = array(
+			'key'    => 'three_gates',
+			'ok'     => ! empty( $gates['server_enabled'] ),
+			'detail' => $gates['note'],
+			'status' => $gates,
 		);
 
 		$failed = array_values( array_filter( $checks, function ( $c ) { return empty( $c['ok'] ); } ) );
@@ -3856,6 +3865,218 @@ MD;
 		}
 		delete_post_meta( $post_id, '_mt_mcp_needs_review' );
 		return array( 'id' => $post_id, 'action' => 'keep', 'status' => $post->post_status, 'needs_review' => false );
+	}
+
+	public function list_changes( $args = array() ) {
+		$limit   = isset( $args['limit'] ) ? max( 1, min( 50, (int) $args['limit'] ) ) : 20;
+		$entries = McpSupport::get_undo_journal( $limit );
+		$items   = array();
+		foreach ( $entries as $entry ) {
+			$items[] = McpSupport::summarize_change( $entry, false );
+		}
+		return array(
+			'items' => $items,
+			'ttl_hours' => (int) ( McpSupport::UNDO_TTL_SECONDS / 3600 ),
+			'hint'  => 'Use get_change for before/written/now; undo_change with token to restore. Never touches OAuth/MCP credentials.',
+		);
+	}
+
+	public function get_change( $args ) {
+		$token = isset( $args['token'] ) ? sanitize_text_field( (string) $args['token'] ) : '';
+		if ( '' === $token ) {
+			throw new \Exception( 'Provide token from list_changes or a write response undo.token.' );
+		}
+		$entry = McpSupport::get_change( $token );
+		if ( ! $entry ) {
+			throw new \Exception( 'Change not found or expired.' );
+		}
+		return McpSupport::summarize_change( $entry, true );
+	}
+
+	public function undo_change( $args ) {
+		$token = isset( $args['token'] ) ? sanitize_text_field( (string) $args['token'] ) : '';
+		if ( '' === $token ) {
+			throw new \Exception( 'Provide undo token.' );
+		}
+		$entry = McpSupport::get_change( $token );
+		if ( ! $entry ) {
+			throw new \Exception( 'Change not found or expired (72h TTL).' );
+		}
+		if ( ! empty( $entry['undone'] ) ) {
+			throw new \Exception( 'This change was already undone.' );
+		}
+		$force   = ! empty( $args['force'] );
+		$dry_run = ! empty( $args['dry_run'] );
+		$summary = McpSupport::summarize_change( $entry, true );
+		if ( ! empty( $summary['drift'] ) && ! $force && ! $dry_run ) {
+			throw new \Exception( 'Live state drifted from the written snapshot (after_hash mismatch). Re-call with force=true to restore anyway, or inspect with get_change.' );
+		}
+		if ( $dry_run ) {
+			return array(
+				'dry_run' => true,
+				'token'   => $token,
+				'would_restore' => $summary['before'],
+				'drift'   => ! empty( $summary['drift'] ),
+			);
+		}
+
+		$action = isset( $entry['action'] ) ? $entry['action'] : 'update';
+		$before = isset( $summary['before'] ) ? $summary['before'] : null;
+		$written = isset( $summary['written'] ) ? $summary['written'] : null;
+
+		if ( 'create' === $action ) {
+			$id = 0;
+			if ( is_array( $written ) && ! empty( $written['id'] ) ) {
+				$id = (int) $written['id'];
+			} elseif ( ! empty( $entry['object']['id'] ) ) {
+				$id = (int) $entry['object']['id'];
+			}
+			if ( ! $id ) {
+				throw new \Exception( 'Cannot undo create: missing post id.' );
+			}
+			McpSupport::assert_can_delete_post( $id );
+			wp_trash_post( $id );
+			$restored = array( 'action' => 'create_undone', 'id' => $id, 'trashed' => true );
+		} elseif ( 'trash' === $action ) {
+			if ( ! is_array( $before ) || empty( $before['id'] ) ) {
+				throw new \Exception( 'Cannot undo trash: missing before snapshot.' );
+			}
+			$id = (int) $before['id'];
+			McpSupport::assert_can_edit_post( $id );
+			wp_untrash_post( $id );
+			$this->apply_post_snapshot( $before );
+			$restored = array( 'action' => 'trash_undone', 'id' => $id, 'status' => get_post_status( $id ) );
+		} else {
+			if ( ! is_array( $before ) || empty( $before['kind'] ) ) {
+				throw new \Exception( 'Cannot undo: missing before snapshot.' );
+			}
+			if ( 'post' === $before['kind'] ) {
+				McpSupport::assert_can_edit_post( (int) $before['id'] );
+				$this->apply_post_snapshot( $before );
+				$restored = array( 'action' => 'update_undone', 'kind' => 'post', 'id' => (int) $before['id'] );
+			} elseif ( 'media' === $before['kind'] ) {
+				$this->apply_media_snapshot( $before );
+				$restored = array( 'action' => 'update_undone', 'kind' => 'media', 'id' => (int) $before['id'] );
+			} elseif ( 'options_page' === $before['kind'] ) {
+				if ( ! current_user_can( 'manage_options' ) ) {
+					throw new \Exception( 'manage_options required to undo options_page.' );
+				}
+				$this->apply_options_page_snapshot( $before );
+				$restored = array( 'action' => 'update_undone', 'kind' => 'options_page', 'page' => $before['page'] );
+			} else {
+				throw new \Exception( 'Unsupported snapshot kind for undo.' );
+			}
+		}
+
+		$journal = get_option( McpSupport::OPTION_UNDO_JOURNAL, array() );
+		if ( is_array( $journal ) && isset( $journal[ $token ] ) ) {
+			$journal[ $token ]['undone']    = true;
+			$journal[ $token ]['undone_at'] = gmdate( 'c' );
+			$journal[ $token ]['undone_by'] = get_current_user_id();
+			update_option( McpSupport::OPTION_UNDO_JOURNAL, $journal, false );
+		}
+
+		return array_merge(
+			$restored,
+			array(
+				'token'  => $token,
+				'undone' => true,
+				'note'   => 'Restored before-state. MCP OAuth credentials and plugin settings were not modified.',
+			)
+		);
+	}
+
+	/**
+	 * Restore a post snapshot. Never writes MCP/OAuth options.
+	 *
+	 * @param array $snap From snapshot_post.
+	 */
+	private function apply_post_snapshot( $snap ) {
+		$id = (int) $snap['id'];
+		if ( ! get_post( $id ) ) {
+			throw new \Exception( 'Post #' . $id . ' no longer exists; cannot restore.' );
+		}
+		$core = isset( $snap['core'] ) && is_array( $snap['core'] ) ? $snap['core'] : array();
+		$update = array( 'ID' => $id );
+		foreach ( array( 'post_title', 'post_content', 'post_excerpt', 'post_status', 'post_name', 'post_parent', 'menu_order' ) as $field ) {
+			if ( array_key_exists( $field, $core ) ) {
+				$update[ $field ] = $core[ $field ];
+			}
+		}
+		$r = wp_update_post( $update, true );
+		if ( is_wp_error( $r ) ) {
+			throw new \Exception( $r->get_error_message() );
+		}
+		if ( array_key_exists( 'featured_image_id', $snap ) ) {
+			$fid = (int) $snap['featured_image_id'];
+			if ( $fid > 0 ) {
+				set_post_thumbnail( $id, $fid );
+			} else {
+				delete_post_thumbnail( $id );
+			}
+		}
+		if ( ! empty( $snap['taxonomies'] ) && is_array( $snap['taxonomies'] ) ) {
+			foreach ( $snap['taxonomies'] as $tax => $term_ids ) {
+				if ( taxonomy_exists( $tax ) ) {
+					wp_set_post_terms( $id, array_map( 'intval', (array) $term_ids ), $tax );
+				}
+			}
+		}
+		if ( ! empty( $snap['yoast'] ) && is_array( $snap['yoast'] ) ) {
+			foreach ( $snap['yoast'] as $key => $value ) {
+				McpSupport::set_yoast_value( $key, $value, $id );
+			}
+		}
+		if ( ! empty( $snap['acf'] ) && is_array( $snap['acf'] ) && function_exists( 'update_field' ) ) {
+			foreach ( $snap['acf'] as $key => $value ) {
+				update_field( $key, $value, $id );
+			}
+		}
+		if ( array_key_exists( 'needs_review', $snap ) ) {
+			if ( $snap['needs_review'] ) {
+				update_post_meta( $id, '_mt_mcp_needs_review', '1' );
+			} else {
+				delete_post_meta( $id, '_mt_mcp_needs_review' );
+			}
+		}
+	}
+
+	private function apply_media_snapshot( $snap ) {
+		$id = (int) $snap['id'];
+		$att = get_post( $id );
+		if ( ! $att || 'attachment' !== $att->post_type ) {
+			throw new \Exception( 'Attachment #' . $id . ' not found.' );
+		}
+		if ( ! current_user_can( 'edit_post', $id ) ) {
+			throw new \Exception( 'Cannot edit attachment #' . $id . '.' );
+		}
+		wp_update_post(
+			array(
+				'ID'           => $id,
+				'post_title'   => isset( $snap['title'] ) ? $snap['title'] : $att->post_title,
+				'post_excerpt' => isset( $snap['caption'] ) ? $snap['caption'] : $att->post_excerpt,
+				'post_content' => isset( $snap['description'] ) ? $snap['description'] : $att->post_content,
+			)
+		);
+		if ( array_key_exists( 'alt', $snap ) ) {
+			update_post_meta( $id, '_wp_attachment_image_alt', $snap['alt'] );
+		}
+	}
+
+	private function apply_options_page_snapshot( $snap ) {
+		if ( ! function_exists( 'update_field' ) ) {
+			throw new \Exception( 'ACF required to restore options_page.' );
+		}
+		$page    = isset( $snap['page'] ) ? $snap['page'] : 'option';
+		$post_id = ( 'options' === $page || 'option' === $page ) ? 'option' : $page;
+		$fields  = isset( $snap['fields'] ) && is_array( $snap['fields'] ) ? $snap['fields'] : array();
+		foreach ( $fields as $key => $value ) {
+			// Never restore MCP / OAuth option keys via ACF field names.
+			if ( is_string( $key ) && 0 === strpos( $key, 'mt_mcp_' ) ) {
+				continue;
+			}
+			update_field( $key, $value, $post_id );
+		}
 	}
 
 	public function manage_connections( $args ) {

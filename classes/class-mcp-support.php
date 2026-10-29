@@ -21,9 +21,23 @@ class McpSupport {
 	const OPTION_CONNECTIONS = 'mt_mcp_connections';
 	const OPTION_DCR_HOSTS   = 'mt_mcp_dcr_extra_hosts';
 	const OPTION_OP_RECEIPTS = 'mt_mcp_op_receipts';
+	const OPTION_UNDO_JOURNAL = 'mt_mcp_undo_journal';
 	const AUDIT_MAX_ENTRIES   = 200;
+	const UNDO_MAX_ENTRIES    = 50;
+	const UNDO_TTL_SECONDS    = 259200; // 72 hours
 	const RATE_LIMIT_PER_MIN  = 120;
 	const AUDIT_HMAC_OPTION   = 'mt_mcp_audit_hmac_key';
+
+	/** Tools that get a pre-write snapshot + undo token (OAuth / MCP options never snapshotted). */
+	const UNDOABLE_TOOLS = array(
+		'create_post',
+		'update_post',
+		'trash_post',
+		'update_media',
+		'update_options_page',
+		'restore_revision',
+		'duplicate_post',
+	);
 
 	const ENVIRONMENTS = array(
 		'production'  => 'Production',
@@ -75,6 +89,7 @@ class McpSupport {
 		'set_write_gates',
 		'manage_connections',
 		'review_draft',
+		'undo_change',
 		'confirm_dangerous_op',
 		'create_redirect',
 		'update_redirect',
@@ -198,6 +213,9 @@ class McpSupport {
 			'manage_connections'     => 'system',
 			'list_needs_review'      => 'content',
 			'review_draft'           => 'content',
+			'list_changes'           => 'audit',
+			'get_change'             => 'audit',
+			'undo_change'            => 'audit',
 			'set_write_gates'        => 'system',
 			'confirm_dangerous_op'   => 'system',
 			'generate_cursor_skill'  => 'system',
@@ -889,6 +907,429 @@ class McpSupport {
 			$ip,
 			FILTER_VALIDATE_IP,
 			FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+		);
+	}
+
+	public static function is_undoable_tool( $tool ) {
+		return in_array( $tool, self::UNDOABLE_TOOLS, true );
+	}
+
+	/**
+	 * Pack a snapshot for storage (gz + base64). Never used for OAuth/MCP secrets.
+	 *
+	 * @param mixed $data Snapshot array.
+	 * @return string
+	 */
+	public static function pack_snapshot( $data ) {
+		$json = wp_json_encode( $data );
+		if ( false === $json ) {
+			return '';
+		}
+		if ( function_exists( 'gzcompress' ) ) {
+			$gz = gzcompress( $json, 6 );
+			if ( false !== $gz ) {
+				return 'gz:' . base64_encode( $gz );
+			}
+		}
+		return 'raw:' . base64_encode( $json );
+	}
+
+	/**
+	 * @param string $packed Packed snapshot.
+	 * @return array|null
+	 */
+	public static function unpack_snapshot( $packed ) {
+		$packed = (string) $packed;
+		if ( '' === $packed ) {
+			return null;
+		}
+		if ( 0 === strpos( $packed, 'gz:' ) ) {
+			$bin = base64_decode( substr( $packed, 3 ), true );
+			if ( false === $bin || ! function_exists( 'gzuncompress' ) ) {
+				return null;
+			}
+			$json = @gzuncompress( $bin );
+		} elseif ( 0 === strpos( $packed, 'raw:' ) ) {
+			$json = base64_decode( substr( $packed, 4 ), true );
+		} else {
+			$json = $packed;
+		}
+		if ( ! is_string( $json ) || '' === $json ) {
+			return null;
+		}
+		$data = json_decode( $json, true );
+		return is_array( $data ) ? $data : null;
+	}
+
+	public static function snapshot_hash( $snap ) {
+		if ( ! is_array( $snap ) ) {
+			return '';
+		}
+		return md5( wp_json_encode( $snap ) );
+	}
+
+	/**
+	 * Full post snapshot for undo. Does not include users, OAuth, or MCP options.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return array|null
+	 */
+	public static function snapshot_post( $post_id ) {
+		$post_id = (int) $post_id;
+		$p       = get_post( $post_id );
+		if ( ! $p ) {
+			return null;
+		}
+		$tax = array();
+		foreach ( get_object_taxonomies( $p->post_type, 'names' ) as $taxonomy ) {
+			$terms = wp_get_post_terms( $post_id, $taxonomy, array( 'fields' => 'ids' ) );
+			$tax[ $taxonomy ] = is_wp_error( $terms ) ? array() : array_map( 'intval', $terms );
+		}
+		$acf = array();
+		if ( function_exists( 'get_fields' ) ) {
+			$fields = get_fields( $post_id );
+			$acf    = is_array( $fields ) ? $fields : array();
+		}
+		return array(
+			'kind'              => 'post',
+			'id'                => $post_id,
+			'core'              => array(
+				'post_title'   => $p->post_title,
+				'post_content' => $p->post_content,
+				'post_excerpt' => $p->post_excerpt,
+				'post_status'  => $p->post_status,
+				'post_name'    => $p->post_name,
+				'post_parent'  => (int) $p->post_parent,
+				'menu_order'   => (int) $p->menu_order,
+				'post_type'    => $p->post_type,
+			),
+			'featured_image_id' => (int) get_post_thumbnail_id( $post_id ),
+			'taxonomies'        => $tax,
+			'yoast'             => self::get_yoast_fields( $post_id ),
+			'acf'               => $acf,
+			'needs_review'      => (bool) get_post_meta( $post_id, '_mt_mcp_needs_review', true ),
+		);
+	}
+
+	/**
+	 * Media attachment snapshot (alt/title/caption/description only).
+	 *
+	 * @param int $attachment_id Attachment ID.
+	 * @return array|null
+	 */
+	public static function snapshot_media( $attachment_id ) {
+		$attachment_id = (int) $attachment_id;
+		$p             = get_post( $attachment_id );
+		if ( ! $p || 'attachment' !== $p->post_type ) {
+			return null;
+		}
+		return array(
+			'kind'        => 'media',
+			'id'          => $attachment_id,
+			'title'       => $p->post_title,
+			'caption'     => $p->post_excerpt,
+			'description' => $p->post_content,
+			'alt'         => (string) get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
+		);
+	}
+
+	/**
+	 * @param string $tool Tool name.
+	 * @param array  $args Normalized tool args.
+	 * @return array|null Before envelope: action + before snap (or null for creates).
+	 */
+	public static function capture_undo_before( $tool, $args ) {
+		if ( ! self::is_undoable_tool( $tool ) ) {
+			return null;
+		}
+		if ( ! empty( $args['dry_run'] ) ) {
+			return null;
+		}
+		switch ( $tool ) {
+			case 'create_post':
+			case 'duplicate_post':
+				return array(
+					'action' => 'create',
+					'before' => null,
+					'label'  => isset( $args['post_title'] ) ? (string) $args['post_title'] : ( isset( $args['core']['post_title'] ) ? (string) $args['core']['post_title'] : 'new post' ),
+				);
+			case 'update_post':
+			case 'restore_revision':
+				$id = self::resolve_post_id( $args );
+				if ( ! $id ) {
+					return null;
+				}
+				$snap = self::snapshot_post( $id );
+				return $snap ? array(
+					'action' => 'update',
+					'before' => $snap,
+					'label'  => $snap['core']['post_title'],
+					'object' => array( 'type' => 'post', 'id' => $id ),
+				) : null;
+			case 'trash_post':
+				if ( ! empty( $args['force_delete'] ) ) {
+					return null; // Permanent delete is not undoable.
+				}
+				$id = self::resolve_post_id( $args );
+				if ( ! $id ) {
+					return null;
+				}
+				$snap = self::snapshot_post( $id );
+				return $snap ? array(
+					'action' => 'trash',
+					'before' => $snap,
+					'label'  => $snap['core']['post_title'],
+					'object' => array( 'type' => 'post', 'id' => $id ),
+				) : null;
+			case 'update_media':
+				$id = 0;
+				foreach ( array( 'id', 'attachment_id', 'media_id' ) as $k ) {
+					if ( ! empty( $args[ $k ] ) ) {
+						$id = (int) $args[ $k ];
+						break;
+					}
+				}
+				if ( ! $id ) {
+					return null;
+				}
+				$snap = self::snapshot_media( $id );
+				return $snap ? array(
+					'action' => 'update',
+					'before' => $snap,
+					'label'  => $snap['title'] ? $snap['title'] : ( 'attachment #' . $id ),
+					'object' => array( 'type' => 'media', 'id' => $id ),
+				) : null;
+			case 'update_options_page':
+				$page = isset( $args['page'] ) ? (string) $args['page'] : ( isset( $args['options_page'] ) ? (string) $args['options_page'] : '' );
+				if ( ! $page || ! function_exists( 'get_fields' ) ) {
+					return null;
+				}
+				$fields = get_fields( 'option' );
+				// Prefer page-scoped if ACF supports it; fall back to all options fields.
+				if ( function_exists( 'acf_get_options_page' ) ) {
+					$page_fields = get_fields( $page );
+					if ( is_array( $page_fields ) ) {
+						$fields = $page_fields;
+					}
+				}
+				return array(
+					'action' => 'update',
+					'before' => array(
+						'kind'   => 'options_page',
+						'page'   => $page,
+						'fields' => is_array( $fields ) ? $fields : array(),
+					),
+					'label'  => 'options:' . $page,
+					'object' => array( 'type' => 'options_page', 'id' => $page ),
+				);
+			default:
+				return null;
+		}
+	}
+
+	/**
+	 * Record a change after a successful write. Returns undo envelope for the tool response.
+	 *
+	 * @param string     $tool Tool name.
+	 * @param array|null $before_envelope From capture_undo_before.
+	 * @param array      $result Tool result.
+	 * @return array|null undo { token, expires_at }
+	 */
+	public static function record_change( $tool, $before_envelope, $result ) {
+		if ( ! is_array( $before_envelope ) || ! is_array( $result ) ) {
+			return null;
+		}
+		if ( ! empty( $result['dry_run'] ) || ! empty( $result['state_token'] ) || ! empty( $result['needs_confirmation'] ) ) {
+			return null;
+		}
+
+		$written = null;
+		$object  = isset( $before_envelope['object'] ) ? $before_envelope['object'] : null;
+		$action  = isset( $before_envelope['action'] ) ? $before_envelope['action'] : 'update';
+
+		if ( in_array( $tool, array( 'create_post', 'duplicate_post' ), true ) && ! empty( $result['id'] ) ) {
+			$written = self::snapshot_post( (int) $result['id'] );
+			$object  = array( 'type' => 'post', 'id' => (int) $result['id'] );
+			$action  = 'create';
+		} elseif ( 'update_post' === $tool || 'restore_revision' === $tool ) {
+			$id      = ! empty( $result['id'] ) ? (int) $result['id'] : ( isset( $object['id'] ) ? (int) $object['id'] : 0 );
+			$written = $id ? self::snapshot_post( $id ) : null;
+		} elseif ( 'trash_post' === $tool && empty( $result['deleted'] ) ) {
+			$id      = isset( $result['id'] ) ? (int) $result['id'] : ( isset( $object['id'] ) ? (int) $object['id'] : 0 );
+			$written = array( 'kind' => 'post', 'id' => $id, 'trashed' => true );
+		} elseif ( 'update_media' === $tool ) {
+			$id      = ! empty( $result['id'] ) ? (int) $result['id'] : ( isset( $object['id'] ) ? (int) $object['id'] : 0 );
+			$written = $id ? self::snapshot_media( $id ) : null;
+		} elseif ( 'update_options_page' === $tool && is_array( $before_envelope['before'] ) ) {
+			$page    = $before_envelope['before']['page'];
+			$fields  = function_exists( 'get_fields' ) ? get_fields( $page ) : null;
+			if ( ! is_array( $fields ) && function_exists( 'get_fields' ) ) {
+				$fields = get_fields( 'option' );
+			}
+			$written = array(
+				'kind'   => 'options_page',
+				'page'   => $page,
+				'fields' => is_array( $fields ) ? $fields : array(),
+			);
+		}
+
+		if ( ! $written && 'create' !== $action ) {
+			return null;
+		}
+
+		$token   = 'und_' . bin2hex( random_bytes( 12 ) );
+		$expires = time() + self::UNDO_TTL_SECONDS;
+		$entry   = array(
+			'token'       => $token,
+			'tool'        => $tool,
+			'action'      => $action,
+			'ts'          => gmdate( 'c' ),
+			'expires_at'  => gmdate( 'c', $expires ),
+			'expires_ts'  => $expires,
+			'user_id'     => get_current_user_id(),
+			'label'       => isset( $before_envelope['label'] ) ? (string) $before_envelope['label'] : $tool,
+			'object'      => $object,
+			'before_pack' => self::pack_snapshot( $before_envelope['before'] ),
+			'written_pack'=> self::pack_snapshot( $written ),
+			'after_hash'  => self::snapshot_hash( $written ),
+			'undone'      => false,
+		);
+
+		$journal = get_option( self::OPTION_UNDO_JOURNAL, array() );
+		if ( ! is_array( $journal ) ) {
+			$journal = array();
+		}
+		$journal[ $token ] = $entry;
+		$journal = self::prune_undo_journal( $journal );
+		update_option( self::OPTION_UNDO_JOURNAL, $journal, false );
+
+		return array(
+			'token'      => $token,
+			'expires_at' => $entry['expires_at'],
+		);
+	}
+
+	public static function prune_undo_journal( $journal ) {
+		$now = time();
+		$out = array();
+		foreach ( $journal as $token => $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+			$exp = isset( $entry['expires_ts'] ) ? (int) $entry['expires_ts'] : 0;
+			if ( $exp && $exp < $now ) {
+				continue;
+			}
+			$out[ $token ] = $entry;
+		}
+		if ( count( $out ) > self::UNDO_MAX_ENTRIES ) {
+			uasort(
+				$out,
+				static function ( $a, $b ) {
+					return strcmp( isset( $a['ts'] ) ? $a['ts'] : '', isset( $b['ts'] ) ? $b['ts'] : '' );
+				}
+			);
+			$out = array_slice( $out, -self::UNDO_MAX_ENTRIES, null, true );
+		}
+		return $out;
+	}
+
+	public static function get_undo_journal( $limit = 50 ) {
+		$journal = get_option( self::OPTION_UNDO_JOURNAL, array() );
+		if ( ! is_array( $journal ) ) {
+			return array();
+		}
+		$journal = self::prune_undo_journal( $journal );
+		update_option( self::OPTION_UNDO_JOURNAL, $journal, false );
+		$rows = array_values( $journal );
+		usort(
+			$rows,
+			static function ( $a, $b ) {
+				return strcmp( isset( $b['ts'] ) ? $b['ts'] : '', isset( $a['ts'] ) ? $a['ts'] : '' );
+			}
+		);
+		$limit = max( 1, min( (int) $limit, self::UNDO_MAX_ENTRIES ) );
+		return array_slice( $rows, 0, $limit );
+	}
+
+	public static function get_change( $token ) {
+		$token   = sanitize_text_field( (string) $token );
+		$journal = get_option( self::OPTION_UNDO_JOURNAL, array() );
+		if ( ! is_array( $journal ) || empty( $journal[ $token ] ) ) {
+			return null;
+		}
+		$entry = $journal[ $token ];
+		if ( ! empty( $entry['expires_ts'] ) && (int) $entry['expires_ts'] < time() ) {
+			return null;
+		}
+		return $entry;
+	}
+
+	/**
+	 * Public summary of a change for list/UI (no packed blobs).
+	 *
+	 * @param array $entry Journal entry.
+	 * @param bool  $include_snaps Include unpacked before/written/now.
+	 * @return array
+	 */
+	public static function summarize_change( $entry, $include_snaps = false ) {
+		$before  = self::unpack_snapshot( isset( $entry['before_pack'] ) ? $entry['before_pack'] : '' );
+		$written = self::unpack_snapshot( isset( $entry['written_pack'] ) ? $entry['written_pack'] : '' );
+		$now     = null;
+		$drift   = false;
+		if ( is_array( $written ) && isset( $written['kind'] ) ) {
+			if ( 'post' === $written['kind'] && ! empty( $written['id'] ) ) {
+				$now = self::snapshot_post( (int) $written['id'] );
+			} elseif ( 'media' === $written['kind'] && ! empty( $written['id'] ) ) {
+				$now = self::snapshot_media( (int) $written['id'] );
+			} elseif ( 'options_page' === $written['kind'] && ! empty( $written['page'] ) && function_exists( 'get_fields' ) ) {
+				$fields = get_fields( $written['page'] );
+				if ( ! is_array( $fields ) ) {
+					$fields = get_fields( 'option' );
+				}
+				$now = array(
+					'kind'   => 'options_page',
+					'page'   => $written['page'],
+					'fields' => is_array( $fields ) ? $fields : array(),
+				);
+			}
+			if ( $now && ! empty( $entry['after_hash'] ) ) {
+				$drift = self::snapshot_hash( $now ) !== $entry['after_hash'];
+			}
+		}
+		$user = ! empty( $entry['user_id'] ) ? get_userdata( (int) $entry['user_id'] ) : null;
+		$out  = array(
+			'token'      => $entry['token'],
+			'tool'       => $entry['tool'],
+			'action'     => $entry['action'],
+			'ts'         => $entry['ts'],
+			'expires_at' => $entry['expires_at'],
+			'label'      => $entry['label'],
+			'object'     => isset( $entry['object'] ) ? $entry['object'] : null,
+			'user'       => $user ? $user->user_login : '',
+			'undone'     => ! empty( $entry['undone'] ),
+			'drift'      => $drift,
+		);
+		if ( $include_snaps ) {
+			$out['before']  = $before;
+			$out['written'] = $written;
+			$out['now']     = $now;
+		}
+		return $out;
+	}
+
+	/**
+	 * Three-gate status for admin / doctor: Enable ∩ tool groups ∩ write ceiling ∩ user caps.
+	 *
+	 * @return array
+	 */
+	public static function three_gate_status() {
+		return array(
+			'server_enabled' => (bool) get_option( self::OPTION_ENABLED ),
+			'allow_writes'   => (bool) get_option( self::OPTION_ALLOW_WRITES ),
+			'pause_writes'   => self::writes_paused(),
+			'tool_groups'    => self::enabled_groups(),
+			'note'           => 'Dispatch requires: Enable MCP ∩ tool group allowlist ∩ read/write ceiling (OAuth scope + Allow writes) ∩ current_user_can (+ object-level caps).',
 		);
 	}
 }

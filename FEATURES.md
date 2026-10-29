@@ -49,6 +49,11 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 - [x] OAuth refresh reuse + audience binding; DCR extra hosts
 - [x] Needs-review inbox + `manage_connections` presets
 
+### Shipped in 1.3.2
+
+- [x] Per-change undo journal (`undo.token`, `list_changes` / `get_change` / `undo_change`) + Changes admin UI
+- [x] Three-gate dispatch documented in site context / connection doctor
+
 ---
 
 ## Capability map (what works today)
@@ -137,9 +142,9 @@ Unblocks daily MT work or closes a production foot-gun. Build these first.
 - [x] **Force draft on create** — `set_write_gates` / Settings; `_mt_mcp_needs_review` + Overview inbox + `list_needs_review` / `review_draft`
 - [x] **Pause writes** — site-wide freeze via `set_write_gates` / Settings; reads still work
 - [x] **Op receipts / idempotent `operation_id`** — write tools store/replay receipts on reconnect
-- [ ] **Per-change undo** + Changes admin UI (before / written / now); restore must keep MCP OAuth working
+- [x] **Per-change undo** + Changes admin UI (before / written / now); restore must keep MCP OAuth working
 - [x] **Safe mode** — force-delete + bulk redirects require `state_token` / `confirm`
-- [ ] **Three-gate dispatch** — tool allowlist ∩ read/write ceiling ∩ `current_user_can`; server inert until Enable
+- [x] **Three-gate dispatch** — tool allowlist ∩ read/write ceiling ∩ `current_user_can`; server inert until Enable
 - [x] **Privacy copy** — initialize instructions spell out model-provider exposure
 - [x] **Site Brief** — owner rules in Settings + `initialize` instructions + `get_site_context`
 - [x] **Identifier-only audit** — ids/keys/slugs/status; bodies/emails redacted in log rows

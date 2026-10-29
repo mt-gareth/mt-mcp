@@ -17,6 +17,7 @@ class Admin {
 		add_action( 'admin_post_mt_mcp_revoke_user', array( $this, 'handle_revoke_user' ) );
 		add_action( 'admin_post_mt_mcp_export_audit_csv', array( $this, 'handle_export_audit_csv' ) );
 		add_action( 'admin_post_mt_mcp_simulate_tool', array( $this, 'handle_simulate_tool' ) );
+		add_action( 'admin_post_mt_mcp_undo_change', array( $this, 'handle_undo_change' ) );
 		add_action( 'update_option_' . McpSupport::OPTION_ENABLED, array( $this, 'on_enabled_change' ), 10, 2 );
 	}
 
@@ -178,6 +179,7 @@ class Admin {
 		$tabs = array(
 			'overview'   => 'Overview',
 			'settings'   => 'Settings',
+			'changes'    => 'Changes',
 			'activity'   => 'Activity',
 			'playground' => 'Playground',
 		);
@@ -221,6 +223,9 @@ class Admin {
 				switch ( $tab ) {
 					case 'settings':
 						$this->render_settings();
+						break;
+					case 'changes':
+						$this->render_changes();
 						break;
 					case 'activity':
 						$this->render_activity();
@@ -621,6 +626,91 @@ class Admin {
 			</details>
 		</div>
 		<?php
+	}
+
+	private function render_changes() {
+		$entries = McpSupport::get_undo_journal( 40 );
+		$notice  = get_transient( 'mt_mcp_undo_notice_' . get_current_user_id() );
+		if ( $notice ) {
+			delete_transient( 'mt_mcp_undo_notice_' . get_current_user_id() );
+		}
+		?>
+		<section class="mt-mcp-card">
+			<h2>Per-change undo</h2>
+			<p class="mt-mcp-help">Snapshots from MCP writes (72h). Restore reverts content only — OAuth grants and MCP settings are never touched.</p>
+			<?php if ( is_array( $notice ) ) : ?>
+				<p class="<?php echo empty( $notice['ok'] ) ? 'mt-mcp-notice' : 'mt-mcp-help'; ?>"><?php echo esc_html( $notice['message'] ); ?></p>
+			<?php endif; ?>
+			<?php if ( empty( $entries ) ) : ?>
+				<p class="mt-mcp-help">No undoable changes yet. Write tools like <code>update_post</code> return an <code>undo.token</code>.</p>
+			<?php else : ?>
+				<table class="mt-mcp-table">
+					<thead>
+						<tr>
+							<th>When</th>
+							<th>Tool</th>
+							<th>Label</th>
+							<th>User</th>
+							<th>Drift</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $entries as $entry ) :
+							$sum = McpSupport::summarize_change( $entry, false );
+							?>
+							<tr>
+								<td><?php echo esc_html( $sum['ts'] ); ?></td>
+								<td><code><?php echo esc_html( $sum['tool'] ); ?></code></td>
+								<td><?php echo esc_html( $sum['label'] ); ?><?php echo ! empty( $sum['undone'] ) ? ' <em>(undone)</em>' : ''; ?></td>
+								<td><?php echo esc_html( $sum['user'] ? $sum['user'] : '—' ); ?></td>
+								<td><?php echo ! empty( $sum['drift'] ) ? 'yes' : '—'; ?></td>
+								<td>
+									<?php if ( empty( $sum['undone'] ) ) : ?>
+										<a class="button button-small"
+										   href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_undo_change&token=' . rawurlencode( $sum['token'] ) . ( ! empty( $sum['drift'] ) ? '&force=1' : '' ) ), 'mt_mcp_undo_change' ) ); ?>"
+										   onclick="return confirm('Restore before-state for this change?');">Undo</a>
+									<?php else : ?>
+										—
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
+		</section>
+		<?php
+	}
+
+	public function handle_undo_change() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Forbidden' );
+		}
+		check_admin_referer( 'mt_mcp_undo_change' );
+		$token = isset( $_GET['token'] ) ? sanitize_text_field( wp_unslash( $_GET['token'] ) ) : '';
+		$force = ! empty( $_GET['force'] );
+		$handlers = new McpToolHandlers();
+		$ok = true;
+		$message = 'Change restored.';
+		try {
+			$handlers->undo_change(
+				array(
+					'token' => $token,
+					'force' => $force,
+				)
+			);
+		} catch ( \Throwable $e ) {
+			$ok = false;
+			$message = $e->getMessage();
+		}
+		set_transient(
+			'mt_mcp_undo_notice_' . get_current_user_id(),
+			array( 'ok' => $ok, 'message' => $message ),
+			60
+		);
+		wp_safe_redirect( admin_url( 'options-general.php?page=' . self::PAGE_SLUG . '&tab=changes' ) );
+		exit;
 	}
 
 	private function render_activity() {

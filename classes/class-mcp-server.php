@@ -1146,6 +1146,40 @@ TXT;
 				),
 			),
 			array(
+				'name'        => 'list_changes',
+				'description' => 'List recent MCP write changes with undo tokens (72h). Does not include OAuth/MCP credential mutations.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit' => array( 'type' => 'integer' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'get_change',
+				'description' => 'Inspect a change: before / written / now snapshots and drift flag.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'token' => array( 'type' => 'string' ),
+					),
+					'required'   => array( 'token' ),
+				),
+			),
+			array(
+				'name'        => 'undo_change',
+				'description' => 'Restore the before-state for an undo token. Refuses on drift unless force=true. Never touches OAuth tokens or MCP plugin options.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'token'   => array( 'type' => 'string' ),
+						'force'   => array( 'type' => 'boolean' ),
+						'dry_run' => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'token' ),
+				),
+			),
+			array(
 				'name'        => 'set_write_gates',
 				'description' => 'Set pause_writes (incident freeze), force_draft (new posts forced to draft + needs_review), and/or site_brief owner rules.',
 				'inputSchema' => array(
@@ -1392,6 +1426,8 @@ TXT;
 			return $this->tool_error( 'Missing tool name.' );
 		}
 
+		// Three-gate dispatch: (1) tool-group allowlist (2) read/write ceiling (3) current_user_can.
+		// Outer gate: server inert until Enable MCP (see handle_request / REST register).
 		if ( ! McpSupport::tool_allowed( $name ) ) {
 			return $this->tool_error( "Tool group for \"$name\" is disabled in Settings > MT MCP." );
 		}
@@ -1439,11 +1475,27 @@ TXT;
 			}
 		}
 
+		$undo_before = null;
+		if ( McpSupport::is_undoable_tool( $name ) && empty( $args['dry_run'] ) ) {
+			try {
+				$undo_before = McpSupport::capture_undo_before( $name, $args );
+			} catch ( \Throwable $e ) {
+				$undo_before = null;
+			}
+		}
+
 		try {
 			$data = call_user_func( array( $this->handlers, $method ), $args );
 		} catch ( \Throwable $e ) {
 			McpSupport::audit( $name, McpSupport::summarize_args( $args ), false, $e->getMessage() );
 			return $this->tool_error( $e->getMessage() );
+		}
+
+		if ( $undo_before && is_array( $data ) ) {
+			$undo = McpSupport::record_change( $name, $undo_before, $data );
+			if ( $undo ) {
+				$data['undo'] = $undo;
+			}
 		}
 
 		if ( $operation_id && McpSupport::is_write_tool( $name ) && empty( $args['dry_run'] ) && is_array( $data ) ) {
@@ -1518,6 +1570,9 @@ TXT;
 			'manage_connections'    => 'manage_connections',
 			'list_needs_review'     => 'list_needs_review',
 			'review_draft'          => 'review_draft',
+			'list_changes'          => 'list_changes',
+			'get_change'            => 'get_change',
+			'undo_change'           => 'undo_change',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',
 			'list_acf_options_pages'=> 'list_acf_options_pages',
