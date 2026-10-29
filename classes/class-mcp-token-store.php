@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class McpTokenStore {
 
-	const DB_VERSION = 1;
+	const DB_VERSION = 2;
 	const OPTION_DB_VERSION = 'mt_mcp_token_db_version';
 
 	public static function table( $which ) {
@@ -61,6 +61,7 @@ class McpTokenStore {
 			code_challenge varchar(128) NOT NULL,
 			scope varchar(191) NOT NULL DEFAULT '',
 			resource text NOT NULL,
+			label varchar(120) NOT NULL DEFAULT '',
 			expires_at bigint(20) unsigned NOT NULL,
 			PRIMARY KEY  (code_hash),
 			KEY expires_at (expires_at)
@@ -73,11 +74,13 @@ class McpTokenStore {
 			user_id bigint(20) unsigned NOT NULL,
 			scope varchar(191) NOT NULL DEFAULT '',
 			resource text NOT NULL,
+			grant_id char(32) NOT NULL DEFAULT '',
 			expires_at bigint(20) unsigned NOT NULL,
 			created_at bigint(20) unsigned NOT NULL DEFAULT 0,
 			PRIMARY KEY  (token_hash),
 			KEY user_id (user_id),
 			KEY client_id (client_id),
+			KEY grant_id (grant_id),
 			KEY expires_at (expires_at)
 		) {$charset};";
 
@@ -86,7 +89,72 @@ class McpTokenStore {
 		dbDelta( $sql_tokens );
 
 		self::migrate_from_options();
+		self::backfill_grant_ids();
 		update_option( self::OPTION_DB_VERSION, self::DB_VERSION );
+	}
+
+	/**
+	 * Assign stable grant_id values so labels/revoke target one consent family.
+	 */
+	public static function backfill_grant_ids() {
+		global $wpdb;
+		$table = self::table( 'tokens' );
+		if ( ! $table ) {
+			return;
+		}
+		// Refresh tokens first — each is a distinct grant row in the admin UI.
+		$refreshes = $wpdb->get_results(
+			"SELECT token_hash, user_id, client_id, created_at FROM {$table} WHERE is_refresh = 1 AND (grant_id IS NULL OR grant_id = '')",
+			ARRAY_A
+		);
+		foreach ( (array) $refreshes as $row ) {
+			$gid = self::new_grant_id();
+			$wpdb->update(
+				$table,
+				array( 'grant_id' => $gid ),
+				array( 'token_hash' => $row['token_hash'] ),
+				array( '%s' ),
+				array( '%s' )
+			);
+			// Pair access tokens issued in the same second for the same user+client.
+			$wpdb->query(
+				$wpdb->prepare(
+					"UPDATE {$table} SET grant_id = %s
+					WHERE is_refresh = 0 AND (grant_id IS NULL OR grant_id = '')
+					AND user_id = %d AND client_id = %s
+					AND ABS(CAST(created_at AS SIGNED) - %d) <= 2",
+					$gid,
+					(int) $row['user_id'],
+					$row['client_id'],
+					(int) $row['created_at']
+				)
+			);
+		}
+		// Orphan access tokens (no matching refresh) still need an id for this session.
+		$orphans = $wpdb->get_results(
+			"SELECT token_hash FROM {$table} WHERE is_refresh = 0 AND (grant_id IS NULL OR grant_id = '')",
+			ARRAY_A
+		);
+		foreach ( (array) $orphans as $row ) {
+			$wpdb->update(
+				$table,
+				array( 'grant_id' => self::new_grant_id() ),
+				array( 'token_hash' => $row['token_hash'] ),
+				array( '%s' ),
+				array( '%s' )
+			);
+		}
+	}
+
+	/**
+	 * @return string 32-char hex
+	 */
+	public static function new_grant_id() {
+		try {
+			return bin2hex( random_bytes( 16 ) );
+		} catch ( \Exception $e ) {
+			return md5( uniqid( (string) wp_rand(), true ) );
+		}
 	}
 
 	/**
@@ -178,9 +246,10 @@ class McpTokenStore {
 				'code_challenge' => $data['code_challenge'],
 				'scope'          => $data['scope'],
 				'resource'       => $data['resource'],
+				'label'          => isset( $data['label'] ) ? substr( sanitize_text_field( (string) $data['label'] ), 0, 120 ) : '',
 				'expires_at'     => (int) $data['expires'],
 			),
-			array( '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%d' )
+			array( '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%d' )
 		);
 	}
 
@@ -191,6 +260,7 @@ class McpTokenStore {
 		if ( $row ) {
 			$wpdb->delete( $table, array( 'code_hash' => $code_hash ), array( '%s' ) );
 			$row['expires'] = (int) $row['expires_at'];
+			$row['label']   = isset( $row['label'] ) ? (string) $row['label'] : '';
 		}
 		return $row;
 	}
@@ -204,6 +274,10 @@ class McpTokenStore {
 
 	public static function store_token( $token_hash, $data ) {
 		global $wpdb;
+		$grant_id = isset( $data['grant_id'] ) ? preg_replace( '/[^a-f0-9]/i', '', (string) $data['grant_id'] ) : '';
+		if ( strlen( $grant_id ) !== 32 ) {
+			$grant_id = self::new_grant_id();
+		}
 		$wpdb->replace(
 			self::table( 'tokens' ),
 			array(
@@ -213,11 +287,13 @@ class McpTokenStore {
 				'user_id'    => (int) $data['user_id'],
 				'scope'      => $data['scope'],
 				'resource'   => isset( $data['resource'] ) ? $data['resource'] : '',
+				'grant_id'   => $grant_id,
 				'expires_at' => (int) $data['expires'],
 				'created_at' => time(),
 			),
-			array( '%s', '%d', '%s', '%d', '%s', '%s', '%d', '%d' )
+			array( '%s', '%d', '%s', '%d', '%s', '%s', '%s', '%d', '%d' )
 		);
+		return $grant_id;
 	}
 
 	public static function get_token( $token_hash ) {
@@ -232,7 +308,52 @@ class McpTokenStore {
 		$row['expires']    = (int) $row['expires_at'];
 		$row['is_refresh'] = (bool) $row['is_refresh'];
 		$row['user_id']    = (int) $row['user_id'];
+		$row['grant_id']   = isset( $row['grant_id'] ) ? (string) $row['grant_id'] : '';
 		return $row;
+	}
+
+	/**
+	 * Ensure a token row has a grant_id (lazy for pre-1.3.17 rows).
+	 *
+	 * @param array<string,mixed> $row Token row from get_token.
+	 * @return string
+	 */
+	public static function ensure_grant_id( array $row ) {
+		$gid = isset( $row['grant_id'] ) ? (string) $row['grant_id'] : '';
+		if ( strlen( $gid ) === 32 ) {
+			return $gid;
+		}
+		global $wpdb;
+		$table = self::table( 'tokens' );
+		// Prefer an existing refresh grant for the same user+client issued together.
+		if ( empty( $row['is_refresh'] ) ) {
+			$match = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT grant_id FROM {$table}
+					WHERE is_refresh = 1 AND grant_id <> ''
+					AND user_id = %d AND client_id = %s
+					AND ABS(CAST(created_at AS SIGNED) - %d) <= 2
+					LIMIT 1",
+					(int) $row['user_id'],
+					$row['client_id'],
+					(int) $row['created_at']
+				)
+			);
+			if ( is_string( $match ) && strlen( $match ) === 32 ) {
+				$gid = $match;
+			}
+		}
+		if ( strlen( $gid ) !== 32 ) {
+			$gid = self::new_grant_id();
+		}
+		$wpdb->update(
+			$table,
+			array( 'grant_id' => $gid ),
+			array( 'token_hash' => $row['token_hash'] ),
+			array( '%s' ),
+			array( '%s' )
+		);
+		return $gid;
 	}
 
 	public static function delete_token( $token_hash ) {
@@ -261,21 +382,29 @@ class McpTokenStore {
 			$user   = get_userdata( (int) $row['user_id'] );
 			$client_id   = $row['client_id'];
 			$client_name = $client ? $client['client_name'] : $row['client_id'];
+			$grant_id    = self::ensure_grant_id( $row );
 			$out[]       = array(
 				'hash'        => substr( $row['token_hash'], 0, 12 ),
 				'token_hash'  => $row['token_hash'],
+				'grant_id'    => $grant_id,
+				'grant_short' => substr( $grant_id, 0, 8 ),
 				'user_id'     => (int) $row['user_id'],
 				'user_login'  => $user ? $user->user_login : '(deleted)',
 				'client_id'   => $client_id,
 				'client_name' => $client_name,
-				'label'       => McpSupport::get_connection_label( (int) $row['user_id'], $client_id ),
+				'label'       => McpSupport::get_connection_label( (int) $row['user_id'], $client_id, $grant_id ),
 				'scope'       => $row['scope'],
+				'created_at'  => gmdate( 'c', (int) $row['created_at'] ),
 				'expires'     => gmdate( 'c', (int) $row['expires_at'] ),
 			);
 		}
 		return $out;
 	}
 
+	/**
+	 * Revoke one consent family (access + refresh sharing grant_id).
+	 * Falls back to the matched refresh row only when grant_id is missing.
+	 */
 	public static function revoke_by_hash_prefix( $prefix ) {
 		global $wpdb;
 		$table = self::table( 'tokens' );
@@ -286,14 +415,12 @@ class McpTokenStore {
 		if ( ! $row ) {
 			return;
 		}
-		$wpdb->delete(
-			$table,
-			array(
-				'client_id' => $row['client_id'],
-				'user_id'   => (int) $row['user_id'],
-			),
-			array( '%s', '%d' )
-		);
+		$grant_id = isset( $row['grant_id'] ) ? (string) $row['grant_id'] : '';
+		if ( strlen( $grant_id ) === 32 ) {
+			$wpdb->delete( $table, array( 'grant_id' => $grant_id ), array( '%s' ) );
+			return;
+		}
+		$wpdb->delete( $table, array( 'token_hash' => $row['token_hash'] ), array( '%s' ) );
 	}
 
 	public static function revoke_all_for_user( $user_id ) {

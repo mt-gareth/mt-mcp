@@ -375,9 +375,6 @@ class McpOAuth {
 			}
 
 			$conn_label = isset( $params['connection_label'] ) ? sanitize_text_field( wp_unslash( $params['connection_label'] ) ) : '';
-			if ( $conn_label ) {
-				McpSupport::set_connection_label( (int) $user->ID, $client_id, $conn_label );
-			}
 
 			$code = bin2hex( random_bytes( 24 ) );
 			McpTokenStore::store_code(
@@ -389,6 +386,7 @@ class McpOAuth {
 					'code_challenge' => $code_challenge,
 					'scope'          => implode( ' ', $scopes ),
 					'resource'       => $resource,
+					'label'          => $conn_label,
 					'expires'        => time() + self::CODE_TTL,
 				)
 			);
@@ -564,7 +562,8 @@ class McpOAuth {
 			return;
 		}
 
-		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $row['scope'], $row['resource'] ) );
+		$pending_label = isset( $row['label'] ) ? (string) $row['label'] : '';
+		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $row['scope'], $row['resource'], null, $pending_label ) );
 	}
 
 	private function refresh_token( $params ) {
@@ -628,14 +627,22 @@ class McpOAuth {
 				$scope_in = implode( ' ', $kept );
 			}
 		}
-		$user  = get_userdata( (int) $row['user_id'] );
-		$scope = implode( ' ', $this->normalize_scopes( $scope_in, $user, $granted ) );
-		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $scope, $resource ) );
+		$user     = get_userdata( (int) $row['user_id'] );
+		$scope    = implode( ' ', $this->normalize_scopes( $scope_in, $user, $granted ) );
+		$grant_id = ! empty( $row['grant_id'] ) ? (string) $row['grant_id'] : McpTokenStore::new_grant_id();
+		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $scope, $resource, $grant_id ) );
 	}
 
-	private function issue_tokens( $user_id, $client_id, $scope, $resource ) {
-		$access  = 'mta_' . bin2hex( random_bytes( 32 ) );
-		$refresh = 'mtr_' . bin2hex( random_bytes( 32 ) );
+	/**
+	 * @param string|null $grant_id Stable consent family id (preserved across refresh).
+	 * @param string      $label    Optional human label applied once at first issue.
+	 */
+	private function issue_tokens( $user_id, $client_id, $scope, $resource, $grant_id = null, $label = '' ) {
+		$access   = 'mta_' . bin2hex( random_bytes( 32 ) );
+		$refresh  = 'mtr_' . bin2hex( random_bytes( 32 ) );
+		$grant_id = is_string( $grant_id ) && strlen( preg_replace( '/[^a-f0-9]/i', '', $grant_id ) ) === 32
+			? strtolower( preg_replace( '/[^a-f0-9]/i', '', $grant_id ) )
+			: McpTokenStore::new_grant_id();
 
 		McpTokenStore::prune_expired_tokens();
 		McpTokenStore::store_token(
@@ -645,6 +652,7 @@ class McpOAuth {
 				'client_id'  => $client_id,
 				'scope'      => $scope,
 				'resource'   => $resource,
+				'grant_id'   => $grant_id,
 				'expires'    => time() + self::ACCESS_TTL,
 				'is_refresh' => false,
 			)
@@ -656,10 +664,15 @@ class McpOAuth {
 				'client_id'  => $client_id,
 				'scope'      => $scope,
 				'resource'   => $resource,
+				'grant_id'   => $grant_id,
 				'expires'    => time() + self::REFRESH_TTL,
 				'is_refresh' => true,
 			)
 		);
+
+		if ( '' !== trim( (string) $label ) ) {
+			McpSupport::set_connection_label( (int) $user_id, $client_id, $label, $grant_id );
+		}
 
 		return array(
 			'access_token'  => $access,
@@ -695,12 +708,14 @@ class McpOAuth {
 		$expected = McpSupport::mcp_resource_url();
 		$bound    = isset( $row['resource'] ) ? $row['resource'] : $expected;
 		$audience_ok = self::static_resources_match( $bound, $expected );
+		$grant_id    = McpTokenStore::ensure_grant_id( $row );
 
 		return array(
 			'ok'          => true,
 			'scope'       => $scope,
 			'user_id'     => (int) $row['user_id'],
 			'client_id'   => isset( $row['client_id'] ) ? (string) $row['client_id'] : '',
+			'grant_id'    => $grant_id,
 			'method'      => 'oauth',
 			'resource'    => $bound,
 			'audience_ok' => $audience_ok,

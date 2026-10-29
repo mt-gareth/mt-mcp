@@ -4,7 +4,7 @@ Tags: mcp, ai, oauth, cursor, claude, acf, rest-api
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.16
+Stable tag: 1.3.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,11 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 
 == Changelog ==
 
+= 1.3.17 =
+* Connection labels are per OAuth grant (grant_id), not per user+client — renaming one Claude session no longer renames the others
+* Active grants table shows grant short id; Revoke removes only that grant family
+* Consent-screen labels attach to the new grant at token issue
+
 = 1.3.16 =
 * Plugin icon for Updates / details UI
 * Tested up to WordPress 7.1 (fixes “not tested” / Compatible up to 6.8.999 on WP 7.x)
@@ -69,6 +74,9 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk second lock; menu:// and media://missing-alt resources; Doctor auth/WAF probe
 
 == Upgrade Notice ==
+
+= 1.3.17 =
+Per-grant connection labels (shared mt_admin + Claude no longer collide). Re-label rows once after update if needed.
 
 = 1.3.16 =
 Plugin icon; WordPress 7.1 compatibility metadata.

@@ -236,6 +236,7 @@ class McpAuth {
 			'user_id'   => $user_id,
 			'method'    => isset( $auth['method'] ) ? $auth['method'] : 'unknown',
 			'client_id' => isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '',
+			'grant_id'  => isset( $auth['grant_id'] ) ? (string) $auth['grant_id'] : '',
 		);
 		self::$current_auth = $out;
 		return $out;

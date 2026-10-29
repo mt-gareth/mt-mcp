@@ -446,7 +446,7 @@ You are connected to an MT WordPress site via mt-mcp. {$prod_note}
 {$user_note}
 
 Always start a session with get_site_context, then use list_post_types / list_acf_field_groups / get_acf_schema before editing structured content. Optionally call generate_cursor_skill and save the SKILL.md into the client repo.
-If get_site_context.connection.labeled is false, call set_connection_label with a human device name (e.g. "Cursor on MacBook" or "Claude Desktop") so admins can identify this grant.
+If get_site_context.connection.labeled is false, call set_connection_label with a human device name (e.g. "Cursor on MacBook" or "Claude Desktop") so admins can identify this grant. Labels are per grant_id (see connection.grant_short) — they do not rename other sessions that share the same WordPress user.
 
 Workflow for content:
 1. search_posts or list_posts to find targets
@@ -484,12 +484,13 @@ TXT;
 			$this->annotate_tool(
 				array(
 					'name'        => 'set_connection_label',
-					'description' => 'Set a human label for this MCP OAuth/App Password connection (shown in Settings → Active OAuth grants). Use device-style names like "Cursor on MacBook" or "Claude Desktop". Call early if get_site_context.connection.labeled is false. Pass label:"" to clear.',
+					'description' => 'Set a human label for THIS OAuth grant only (Settings → Active OAuth grants). Does not rename other Claude/Cursor sessions that share the same WordPress user. Use device-style names like "Cursor on MacBook". Match rows via connection.grant_short from get_site_context. Call early if connection.labeled is false. Pass label:"" to clear this grant.',
 					'inputSchema' => array(
 						'type'       => 'object',
 						'properties' => array(
 							'label'     => array( 'type' => 'string', 'description' => 'Human-readable label (max 120 chars).' ),
-							'client_id' => array( 'type' => 'string', 'description' => 'Optional; defaults to this session. Admins may target another client.' ),
+							'grant_id'  => array( 'type' => 'string', 'description' => 'Optional; defaults to this session grant_id. Admins may target another grant.' ),
+							'client_id' => array( 'type' => 'string', 'description' => 'Optional; defaults to this session. Admins may override.' ),
 							'user_id'   => array( 'type' => 'integer', 'description' => 'Optional; admins only.' ),
 						),
 						'required'   => array( 'label' ),

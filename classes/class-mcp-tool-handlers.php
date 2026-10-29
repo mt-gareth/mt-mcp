@@ -93,8 +93,8 @@ class McpToolHandlers {
 
 
 	/**
-	 * Label this OAuth/App Password connection for the Active grants table.
-	 * Args: label (required), client_id? (defaults to current session), user_id? (admins only).
+	 * Label this OAuth grant for the Active grants table (this session only).
+	 * Args: label (required), grant_id? (defaults to current session; admins may target another).
 	 */
 	public function set_connection_label( $args = array() ) {
 		$label = isset( $args['label'] ) ? trim( (string) $args['label'] ) : '';
@@ -104,6 +104,17 @@ class McpToolHandlers {
 		$auth      = McpAuth::current_auth();
 		$user_id   = get_current_user_id();
 		$client_id = isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '';
+		$grant_id  = isset( $auth['grant_id'] ) ? (string) $auth['grant_id'] : '';
+		if ( isset( $args['grant_id'] ) && '' !== (string) $args['grant_id'] ) {
+			$requested = preg_replace( '/[^a-f0-9]/i', '', (string) $args['grant_id'] );
+			if ( strlen( $requested ) !== 32 ) {
+				throw new \Exception( 'grant_id must be a 32-char hex id from get_site_context.connection.grant_id.' );
+			}
+			if ( ! current_user_can( 'manage_options' ) && strtolower( $requested ) !== strtolower( $grant_id ) ) {
+				throw new \Exception( 'Only admins can label another grant_id.' );
+			}
+			$grant_id = strtolower( $requested );
+		}
 		if ( isset( $args['client_id'] ) && '' !== (string) $args['client_id'] ) {
 			if ( ! current_user_can( 'manage_options' ) && (string) $args['client_id'] !== $client_id ) {
 				throw new \Exception( 'Only admins can label another client_id.' );
@@ -125,11 +136,14 @@ class McpToolHandlers {
 		if ( ! $client_id ) {
 			throw new \Exception( 'Could not resolve client_id for this session. Pass client_id from get_site_context.connection.' );
 		}
-		$result = McpSupport::set_connection_label( $user_id, $client_id, $label );
+		if ( ! $grant_id && 'app' !== $client_id ) {
+			throw new \Exception( 'Could not resolve grant_id for this session. Re-authorize, or pass grant_id from get_site_context.connection.' );
+		}
+		$result               = McpSupport::set_connection_label( $user_id, $client_id, $label, $grant_id );
 		$result['connection'] = McpSupport::current_connection_info();
 		$result['message']    = '' === $label
-			? 'Label cleared.'
-			: 'Label saved. It appears under Settings → MT MCP → Active OAuth grants.';
+			? 'Label cleared for this grant only.'
+			: 'Label saved for this grant only (grant_short=' . substr( (string) $grant_id, 0, 8 ) . '). Other Claude/Cursor sessions on the same WP user are unchanged.';
 		return $result;
 	}
 

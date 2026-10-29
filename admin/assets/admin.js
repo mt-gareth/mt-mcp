@@ -150,6 +150,7 @@
 		body.append('nonce', cfg.labelNonce || '');
 		body.append('user_id', row.getAttribute('data-user-id') || '');
 		body.append('client_id', row.getAttribute('data-client-id') || '');
+		body.append('grant_id', row.getAttribute('data-grant-id') || '');
 		body.append('label', next);
 		input.disabled = true;
 		if (status) {

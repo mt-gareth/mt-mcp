@@ -91,7 +91,7 @@ class Admin {
 	}
 
 	/**
-	 * Save a human label for an OAuth grant (user + client).
+	 * Save a human label for one OAuth grant (by grant_id when present).
 	 */
 	public function ajax_save_grant_label() {
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -100,11 +100,12 @@ class Admin {
 		check_ajax_referer( 'mt_mcp_save_grant_label', 'nonce' );
 		$user_id   = isset( $_POST['user_id'] ) ? (int) $_POST['user_id'] : 0;
 		$client_id = isset( $_POST['client_id'] ) ? sanitize_text_field( wp_unslash( $_POST['client_id'] ) ) : '';
+		$grant_id  = isset( $_POST['grant_id'] ) ? sanitize_text_field( wp_unslash( $_POST['grant_id'] ) ) : '';
 		$label     = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '';
 		if ( ! $user_id || '' === $client_id ) {
 			wp_send_json_error( array( 'message' => 'Missing user or client.' ), 400 );
 		}
-		$result = McpSupport::set_connection_label( $user_id, $client_id, $label );
+		$result = McpSupport::set_connection_label( $user_id, $client_id, $label, $grant_id );
 		wp_send_json_success( $result );
 	}
 
@@ -454,7 +455,7 @@ class Admin {
 
 		<section class="mt-mcp-card">
 			<h2><?php esc_html_e( 'Active OAuth grants', 'mt-mcp' ); ?></h2>
-			<p class="mt-mcp-help"><?php esc_html_e( 'Label each grant so you can tell devices apart (e.g. “Cursor on MacBook” vs “Claude Desktop”). Labels save when you leave the field. Agents call set_connection_label when unlabeled.', 'mt-mcp' ); ?></p>
+			<p class="mt-mcp-help"><?php esc_html_e( 'Label each grant so you can tell devices apart (e.g. “Cursor on MacBook” vs “Claude Desktop”). Each row is a separate OAuth consent — renaming one does not rename others that share the same WordPress user. Labels save when you leave the field. Agents call set_connection_label for their grant only.', 'mt-mcp' ); ?></p>
 			<?php if ( empty( $grants ) ) : ?>
 				<p class="mt-mcp-help"><?php esc_html_e( 'No agents connected yet. Add the JSON above, enable the server, then approve the consent screen.', 'mt-mcp' ); ?></p>
 			<?php else : ?>
@@ -515,6 +516,7 @@ class Admin {
 						<th><?php esc_html_e( 'Label', 'mt-mcp' ); ?></th>
 						<th><?php esc_html_e( 'User', 'mt-mcp' ); ?></th>
 						<th><?php esc_html_e( 'Client', 'mt-mcp' ); ?></th>
+						<th><?php esc_html_e( 'Grant', 'mt-mcp' ); ?></th>
 						<th><?php esc_html_e( 'Scope', 'mt-mcp' ); ?></th>
 						<th><?php esc_html_e( 'Expires', 'mt-mcp' ); ?></th>
 						<th></th>
@@ -531,8 +533,15 @@ class Admin {
 						$client_title = ! empty( $g['client_name'] ) && $g['client_name'] !== $client_short
 							? $g['client_name'] . ' — ' . $g['client_id']
 							: (string) $g['client_id'];
+						$grant_short  = isset( $g['grant_short'] ) ? (string) $g['grant_short'] : '';
+						$grant_id     = isset( $g['grant_id'] ) ? (string) $g['grant_id'] : '';
+						$created_h    = ! empty( $g['created_at'] ) ? $g['created_at'] : '';
 						?>
-						<tr data-user-id="<?php echo esc_attr( (string) $g['user_id'] ); ?>" data-client-id="<?php echo esc_attr( $g['client_id'] ); ?>">
+						<tr
+							data-user-id="<?php echo esc_attr( (string) $g['user_id'] ); ?>"
+							data-client-id="<?php echo esc_attr( $g['client_id'] ); ?>"
+							data-grant-id="<?php echo esc_attr( $grant_id ); ?>"
+						>
 							<td class="mt-mcp-grant-label-cell">
 								<input type="text"
 									class="mt-mcp-grant-label"
@@ -547,12 +556,15 @@ class Admin {
 							<td>
 								<span class="mt-mcp-grant-client" title="<?php echo esc_attr( $client_title ); ?>"><?php echo esc_html( $client_short ); ?></span>
 							</td>
+							<td>
+								<code class="mt-mcp-grant-id" title="<?php echo esc_attr( $grant_id . ( $created_h ? ' · issued ' . $created_h : '' ) ); ?>"><?php echo esc_html( $grant_short ? $grant_short : '—' ); ?></code>
+							</td>
 							<td><code class="mt-mcp-scope"><?php echo esc_html( $g['scope'] ); ?></code></td>
 							<td><time datetime="<?php echo esc_attr( $g['expires'] ); ?>" title="<?php echo esc_attr( $g['expires'] ); ?>"><?php echo esc_html( $expires_h ); ?></time></td>
 							<td class="mt-mcp-grant-actions">
 								<a class="button button-small"
 								   href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_revoke_grant&hash=' . rawurlencode( $g['hash'] ) ), 'mt_mcp_revoke_grant' ) ); ?>"
-								   onclick="return confirm('Revoke this grant?');"><?php esc_html_e( 'Revoke', 'mt-mcp' ); ?></a>
+								   onclick="return confirm('Revoke this grant only?');"><?php esc_html_e( 'Revoke', 'mt-mcp' ); ?></a>
 							</td>
 						</tr>
 					<?php endforeach; ?>

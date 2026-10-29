@@ -1391,7 +1391,7 @@ class McpSupport {
 	}
 
 	/**
-	 * Stable key for an OAuth (or app-password) connection label.
+	 * Legacy key (pre-1.3.17): one label per user+client. Kept as read fallback.
 	 *
 	 * @param int    $user_id   WP user id.
 	 * @param string $client_id OAuth client id, or "app" / empty for Application Passwords.
@@ -1407,6 +1407,17 @@ class McpSupport {
 	}
 
 	/**
+	 * Per-grant label key (survives refresh rotation via stable grant_id).
+	 *
+	 * @param string $grant_id 32-char hex.
+	 * @return string
+	 */
+	public static function grant_label_key( $grant_id ) {
+		$grant_id = preg_replace( '/[^a-f0-9]/i', '', (string) $grant_id );
+		return 'g:' . strtolower( $grant_id );
+	}
+
+	/**
 	 * @return array<string,array{label:string,updated_at:string,updated_by:string}>
 	 */
 	public static function connection_labels() {
@@ -1417,12 +1428,20 @@ class McpSupport {
 	/**
 	 * @param int    $user_id   User.
 	 * @param string $client_id Client id.
+	 * @param string $grant_id  Optional stable grant id (preferred).
 	 * @return string
 	 */
-	public static function get_connection_label( $user_id, $client_id = '' ) {
-		$key  = self::connection_label_key( $user_id, $client_id );
-		$all  = self::connection_labels();
-		$row  = isset( $all[ $key ] ) ? $all[ $key ] : null;
+	public static function get_connection_label( $user_id, $client_id = '', $grant_id = '' ) {
+		$all = self::connection_labels();
+		$gid = preg_replace( '/[^a-f0-9]/i', '', (string) $grant_id );
+		if ( strlen( $gid ) === 32 ) {
+			$gkey = self::grant_label_key( $gid );
+			if ( isset( $all[ $gkey ] ) && is_array( $all[ $gkey ] ) && ! empty( $all[ $gkey ]['label'] ) ) {
+				return (string) $all[ $gkey ]['label'];
+			}
+		}
+		$key = self::connection_label_key( $user_id, $client_id );
+		$row = isset( $all[ $key ] ) ? $all[ $key ] : null;
 		return ( is_array( $row ) && ! empty( $row['label'] ) ) ? (string) $row['label'] : '';
 	}
 
@@ -1430,32 +1449,44 @@ class McpSupport {
 	 * @param int    $user_id   User.
 	 * @param string $client_id Client id.
 	 * @param string $label     Human label (e.g. "Cursor on MacBook").
-	 * @return array{key:string,label:string,updated_at:string}
+	 * @param string $grant_id  Optional; when set, labels only this grant (not every Claude session).
+	 * @return array{key:string,label:string,updated_at:string,grant_id?:string}
 	 */
-	public static function set_connection_label( $user_id, $client_id, $label ) {
+	public static function set_connection_label( $user_id, $client_id, $label, $grant_id = '' ) {
 		$user_id = (int) $user_id;
 		$label   = sanitize_text_field( (string) $label );
 		$label   = substr( $label, 0, 120 );
-		$key     = self::connection_label_key( $user_id, $client_id );
+		$gid     = preg_replace( '/[^a-f0-9]/i', '', (string) $grant_id );
+		$key     = ( strlen( $gid ) === 32 )
+			? self::grant_label_key( $gid )
+			: self::connection_label_key( $user_id, $client_id );
 		$all     = self::connection_labels();
 		$user    = wp_get_current_user();
 		if ( '' === $label ) {
 			unset( $all[ $key ] );
 		} else {
-			$all[ $key ] = array(
+			$entry = array(
 				'label'      => $label,
 				'user_id'    => $user_id,
 				'client_id'  => (string) $client_id,
 				'updated_at' => gmdate( 'c' ),
 				'updated_by' => $user && $user->ID ? $user->user_login : '',
 			);
+			if ( strlen( $gid ) === 32 ) {
+				$entry['grant_id'] = strtolower( $gid );
+			}
+			$all[ $key ] = $entry;
 		}
 		update_option( self::OPTION_CONNECTION_LABELS, $all, false );
-		return array(
+		$out = array(
 			'key'        => $key,
 			'label'      => $label,
 			'updated_at' => gmdate( 'c' ),
 		);
+		if ( strlen( $gid ) === 32 ) {
+			$out['grant_id'] = strtolower( $gid );
+		}
+		return $out;
 	}
 
 	/**
@@ -1473,6 +1504,7 @@ class McpSupport {
 			);
 		}
 		$client_id   = isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '';
+		$grant_id    = isset( $auth['grant_id'] ) ? (string) $auth['grant_id'] : '';
 		$client_name = '';
 		if ( $client_id && class_exists( __NAMESPACE__ . '\\McpTokenStore' ) ) {
 			$client = McpTokenStore::get_client( $client_id );
@@ -1481,18 +1513,23 @@ class McpSupport {
 			$client_name = 'Application Password';
 			$client_id   = 'app';
 		}
-		$label = self::get_connection_label( (int) $user->ID, $client_id );
+		$label = self::get_connection_label( (int) $user->ID, $client_id, $grant_id );
+		$short = $grant_id ? substr( $grant_id, 0, 8 ) : '';
 		return array(
 			'user_login'   => $user->user_login,
 			'client_id'    => $client_id,
 			'client_name'  => $client_name,
+			'grant_id'     => $grant_id,
+			'grant_short'  => $short,
 			'label'        => $label,
 			'labeled'      => ( '' !== $label ),
 			'method'       => isset( $auth['method'] ) ? $auth['method'] : '',
 			'scope'        => isset( $auth['scope'] ) ? $auth['scope'] : '',
 			'hint'         => '' === $label
-				? 'This connection has no label. Call set_connection_label with a clear device name like "Cursor on MacBook" or "Claude Desktop" so admins can tell grants apart.'
-				: 'Connection label is set. Update with set_connection_label if the device/client changes.',
+				? 'This connection has no label. Call set_connection_label with a clear device name like "Cursor on MacBook" or "Claude Desktop". Labels apply to this grant only (see grant_short), not every session sharing the same WP user + Claude client.'
+				: ( $short
+					? 'Label is set for this grant only (grant_short=' . $short . '). set_connection_label updates only this session.'
+					: 'Connection label is set. Update with set_connection_label if the device/client changes.' ),
 		);
 	}
 
