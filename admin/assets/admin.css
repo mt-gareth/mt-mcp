@@ -499,7 +499,13 @@
 }
 
 .mt-mcp-grant-client {
+	display: inline-block;
+	max-width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-weight: 600;
+	vertical-align: bottom;
 }
 
 .mt-mcp-scope {

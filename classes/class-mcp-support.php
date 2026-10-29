@@ -1354,6 +1354,43 @@ class McpSupport {
 	}
 
 	/**
+	 * Short display name for an OAuth client (grants table).
+	 *
+	 * @param string $client_id   Raw client id (may be a CIMD URL).
+	 * @param string $client_name Registered client_name.
+	 * @return string
+	 */
+	public static function friendly_client_label( $client_id, $client_name = '' ) {
+		$id   = (string) $client_id;
+		$name = (string) $client_name;
+		$hay  = strtolower( $id . ' ' . $name );
+
+		if ( false !== strpos( $hay, 'claude.ai' ) || false !== strpos( $hay, 'anthropic' ) ) {
+			return 'Claude';
+		}
+		if ( false !== strpos( $hay, 'chatgpt.com' ) || false !== strpos( $hay, 'openai.com' ) ) {
+			return 'ChatGPT';
+		}
+		if ( false !== strpos( $hay, 'cursor' ) && ( false !== strpos( $hay, 'cursor.sh' ) || 'cursor' === strtolower( $name ) ) ) {
+			return 'Cursor';
+		}
+
+		$label = $name !== '' ? $name : $id;
+		if ( 0 === stripos( $label, 'http://' ) || 0 === stripos( $label, 'https://' ) ) {
+			$host = wp_parse_url( $label, PHP_URL_HOST );
+			if ( is_string( $host ) && $host ) {
+				$label = preg_replace( '/^www\./i', '', $host );
+			}
+		}
+
+		$label = trim( (string) $label );
+		if ( strlen( $label ) > 28 ) {
+			$label = substr( $label, 0, 25 ) . '…';
+		}
+		return $label !== '' ? $label : 'Client';
+	}
+
+	/**
 	 * Stable key for an OAuth (or app-password) connection label.
 	 *
 	 * @param int    $user_id   WP user id.

@@ -17,6 +17,7 @@ class Admin {
 	public function __construct() {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
+		add_filter( 'plugin_action_links_' . plugin_basename( MT_MCP_FILE ), array( $this, 'plugin_action_links' ) );
 		add_action( 'wp_ajax_mt_mcp_save_setting', array( $this, 'ajax_save_setting' ) );
 		add_action( 'wp_ajax_mt_mcp_save_grant_label', array( $this, 'ajax_save_grant_label' ) );
 		add_action( 'admin_post_mt_mcp_revoke_grant', array( $this, 'handle_revoke_grant' ) );
@@ -25,6 +26,25 @@ class Admin {
 		add_action( 'admin_post_mt_mcp_simulate_tool', array( $this, 'handle_simulate_tool' ) );
 		add_action( 'admin_post_mt_mcp_undo_change', array( $this, 'handle_undo_change' ) );
 		add_action( 'update_option_' . McpSupport::OPTION_ENABLED, array( $this, 'on_enabled_change' ), 10, 2 );
+	}
+
+	/**
+	 * Plugins list row: Settings → Overview.
+	 *
+	 * @param string[] $links Existing action links.
+	 * @return string[]
+	 */
+	public function plugin_action_links( $links ) {
+		$url = admin_url( 'options-general.php?page=' . self::PAGE_SLUG . '&tab=overview' );
+		array_unshift(
+			$links,
+			sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( $url ),
+				esc_html__( 'Settings', 'mt-mcp' )
+			)
+		);
+		return $links;
 	}
 
 	public function register_menu() {
@@ -502,8 +522,15 @@ class Admin {
 				</thead>
 				<tbody>
 					<?php foreach ( $grants as $g ) :
-						$expires_ts = strtotime( $g['expires'] );
-						$expires_h  = $expires_ts ? gmdate( 'Y-m-d', $expires_ts ) : $g['expires'];
+						$expires_ts   = strtotime( $g['expires'] );
+						$expires_h    = $expires_ts ? gmdate( 'Y-m-d', $expires_ts ) : $g['expires'];
+						$client_short = McpSupport::friendly_client_label(
+							isset( $g['client_id'] ) ? $g['client_id'] : '',
+							isset( $g['client_name'] ) ? $g['client_name'] : ''
+						);
+						$client_title = ! empty( $g['client_name'] ) && $g['client_name'] !== $client_short
+							? $g['client_name'] . ' — ' . $g['client_id']
+							: (string) $g['client_id'];
 						?>
 						<tr data-user-id="<?php echo esc_attr( (string) $g['user_id'] ); ?>" data-client-id="<?php echo esc_attr( $g['client_id'] ); ?>">
 							<td class="mt-mcp-grant-label-cell">
@@ -518,7 +545,7 @@ class Admin {
 							</td>
 							<td><?php echo esc_html( $g['user_login'] ); ?></td>
 							<td>
-								<span class="mt-mcp-grant-client" title="<?php echo esc_attr( $g['client_id'] ); ?>"><?php echo esc_html( $g['client_name'] ); ?></span>
+								<span class="mt-mcp-grant-client" title="<?php echo esc_attr( $client_title ); ?>"><?php echo esc_html( $client_short ); ?></span>
 							</td>
 							<td><code class="mt-mcp-scope"><?php echo esc_html( $g['scope'] ); ?></code></td>
 							<td><time datetime="<?php echo esc_attr( $g['expires'] ); ?>" title="<?php echo esc_attr( $g['expires'] ); ?>"><?php echo esc_html( $expires_h ); ?></time></td>
