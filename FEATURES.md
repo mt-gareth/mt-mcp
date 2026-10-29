@@ -57,6 +57,7 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 ### Shipped in 1.3.3
 
 - [x] `list_theme_templates`, `plugin_capability_matrix`, `diff_public_html`, `check_links`, `replace_attachment_file`
+- [x] `bulk_update_posts` (status/author/parent) + safe `list_users`
 
 ---
 
@@ -179,8 +180,8 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **SVG sanitize** on upload
 - [x] **Replace attachment file** (keep ID — preserves ACF image fields)
 - [x] **Link checker** across a post type (capped)
-- [ ] **Bulk status / author / parent**
-- [ ] **`set post_author`** + safe `list_users` for assignment
+- [x] **Bulk status / author / parent** — `bulk_update_posts`
+- [x] **`set post_author`** + safe `list_users` for assignment
 - [x] **Theme templates list** — `list_theme_templates` (+ `describe_post_type`)
 - [x] **Plugin capability matrix** — which SEO/redirect tools unlock for this site
 - [ ] **CPT deep inventory / permalinks clash list**

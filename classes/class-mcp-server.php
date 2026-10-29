@@ -519,6 +519,35 @@ TXT;
 					),
 				),
 			),
+			
+			array(
+				'name'        => 'list_users',
+				'description' => 'List users for author assignment: id, login, display_name, roles. Emails only if include_email=true.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit'          => array( 'type' => 'integer' ),
+						'role'           => array( 'type' => 'string' ),
+						'search'         => array( 'type' => 'string' ),
+						'include_email'  => array( 'type' => 'boolean' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'bulk_update_posts',
+				'description' => 'Bulk set post_status / post_author / post_parent on up to 50 ids. Supports dry_run.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'ids'          => array( 'type' => 'array', 'items' => array( 'type' => 'integer' ) ),
+						'post_status'  => array( 'type' => 'string' ),
+						'post_author'  => array( 'type' => 'integer' ),
+						'post_parent'  => array( 'type' => 'integer' ),
+						'dry_run'      => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'ids' ),
+				),
+			),
 			array(
 				'name'        => 'replace_attachment_file',
 				'description' => 'Replace an attachment’s file bytes while keeping the same ID (ACF image fields stay valid). data_base64 or source_url (SSRF-safe).',
@@ -1635,6 +1664,8 @@ TXT;
 			'diff_public_html'      => 'diff_public_html',
 			'check_links'           => 'check_links',
 			'replace_attachment_file' => 'replace_attachment_file',
+			'list_users'             => 'list_users',
+			'bulk_update_posts'      => 'bulk_update_posts',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',
 			'list_acf_options_pages'=> 'list_acf_options_pages',

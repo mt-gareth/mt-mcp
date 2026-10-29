@@ -138,6 +138,8 @@ class McpAuth {
 			'review_draft'             => 'edit_posts',
 			'confirm_dangerous_op'     => 'edit_posts',
 			'find_replace'             => 'edit_posts',
+			'bulk_update_posts'        => 'edit_posts',
+			'list_users'               => 'edit_posts',
 			'create_redirect'          => 'manage_options',
 			'update_redirect'          => 'manage_options',
 			'delete_redirect'          => 'manage_options',

@@ -4545,4 +4545,127 @@ MD;
 		return $out;
 	}
 
+	/**
+	 * Safe user list for author assignment (no emails by default).
+	 */
+	public function list_users( $args = array() ) {
+		if ( ! current_user_can( 'list_users' ) && ! current_user_can( 'edit_others_posts' ) ) {
+			throw new \Exception( 'list_users or edit_others_posts required.' );
+		}
+		$limit = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 50;
+		$role  = isset( $args['role'] ) ? sanitize_key( $args['role'] ) : '';
+		$search = isset( $args['search'] ) ? sanitize_text_field( $args['search'] ) : '';
+		$query = array(
+			'number'  => $limit,
+			'orderby' => 'display_name',
+			'order'   => 'ASC',
+			'fields'  => array( 'ID', 'user_login', 'display_name' ),
+		);
+		if ( $role ) {
+			$query['role'] = $role;
+		}
+		if ( $search ) {
+			$query['search']         = '*' . $search . '*';
+			$query['search_columns'] = array( 'user_login', 'display_name' );
+		}
+		$users = get_users( $query );
+		$out   = array();
+		foreach ( $users as $u ) {
+			$userdata = get_userdata( $u->ID );
+			$item     = array(
+				'id'           => (int) $u->ID,
+				'login'        => $u->user_login,
+				'display_name' => $u->display_name,
+				'roles'        => $userdata ? array_values( $userdata->roles ) : array(),
+			);
+			if ( ! empty( $args['include_email'] ) && current_user_can( 'list_users' ) ) {
+				$item['email'] = $userdata ? $userdata->user_email : '';
+			}
+			$out[] = $item;
+		}
+		return array( 'users' => $out, 'count' => count( $out ) );
+	}
+
+	public function bulk_update_posts( $args ) {
+		$ids = array();
+		if ( ! empty( $args['ids'] ) && is_array( $args['ids'] ) ) {
+			$ids = array_map( 'intval', $args['ids'] );
+		} elseif ( ! empty( $args['id'] ) ) {
+			$ids = array( (int) $args['id'] );
+		}
+		$ids = array_values( array_filter( array_unique( $ids ) ) );
+		if ( empty( $ids ) ) {
+			throw new \Exception( 'Provide ids: [int, ...] (max 50).' );
+		}
+		if ( count( $ids ) > 50 ) {
+			throw new \Exception( 'Max 50 posts per bulk_update_posts.' );
+		}
+
+		$fields = array();
+		if ( isset( $args['post_status'] ) ) {
+			$fields['post_status'] = sanitize_key( $args['post_status'] );
+		}
+		if ( isset( $args['post_author'] ) || isset( $args['author'] ) ) {
+			$fields['post_author'] = (int) ( isset( $args['post_author'] ) ? $args['post_author'] : $args['author'] );
+		}
+		if ( array_key_exists( 'post_parent', $args ) || array_key_exists( 'parent', $args ) ) {
+			$fields['post_parent'] = (int) ( array_key_exists( 'post_parent', $args ) ? $args['post_parent'] : $args['parent'] );
+		}
+		if ( empty( $fields ) ) {
+			throw new \Exception( 'Provide at least one of post_status, post_author, post_parent.' );
+		}
+		if ( ! empty( $fields['post_author'] ) ) {
+			if ( ! get_userdata( $fields['post_author'] ) ) {
+				throw new \Exception( 'Unknown post_author user id.' );
+			}
+			if ( ! current_user_can( 'edit_others_posts' ) && (int) $fields['post_author'] !== get_current_user_id() ) {
+				throw new \Exception( 'edit_others_posts required to reassign author.' );
+			}
+		}
+
+		$dry_run = ! empty( $args['dry_run'] );
+		$results = array();
+		foreach ( $ids as $id ) {
+			try {
+				McpSupport::assert_can_edit_post( $id );
+				$before = get_post( $id );
+				$row    = array(
+					'id'     => $id,
+					'before' => array(
+						'post_status' => $before->post_status,
+						'post_author' => (int) $before->post_author,
+						'post_parent' => (int) $before->post_parent,
+						'title'       => $before->post_title,
+					),
+					'planned'=> $fields,
+				);
+				if ( $dry_run ) {
+					$row['dry_run'] = true;
+					$results[] = $row;
+					continue;
+				}
+				$update = array_merge( array( 'ID' => $id ), $fields );
+				$r = wp_update_post( $update, true );
+				if ( is_wp_error( $r ) ) {
+					throw new \Exception( $r->get_error_message() );
+				}
+				$after = get_post( $id );
+				$row['after'] = array(
+					'post_status' => $after->post_status,
+					'post_author' => (int) $after->post_author,
+					'post_parent' => (int) $after->post_parent,
+				);
+				$row['ok'] = true;
+				$results[] = $row;
+			} catch ( \Throwable $e ) {
+				$results[] = array( 'id' => $id, 'ok' => false, 'error' => $e->getMessage() );
+			}
+		}
+		return array(
+			'dry_run' => $dry_run,
+			'updated' => count( array_filter( $results, function ( $r ) { return ! empty( $r['ok'] ); } ) ),
+			'results' => $results,
+		);
+	}
+
 }
