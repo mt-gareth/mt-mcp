@@ -1,0 +1,19 @@
+.DS_Store
+*.log
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.zip
+*.tar.gz
+node_modules/
+vendor/
+.phpunit.result.cache
+.env
+.env.*
+!.env.example
+
+# Keep docs tracked even if a global ignore has *.md
+!*.md
+!/**/*.md

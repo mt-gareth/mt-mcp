@@ -1,0 +1,156 @@
+<?php
+/**
+ * Plugin Name: MT MCP
+ * Plugin URI:  https://motiontactic.com
+ * Description: Standalone Model Context Protocol (MCP) server for WordPress. OAuth 2.1 / Application Password user login — no shared API keys.
+ * Version:     1.3.0
+ * Author:      Motion Tactic
+ * Author URI:  https://motiontactic.com
+ * Text Domain: mt-mcp
+ * Requires at least: 6.1
+ * Requires PHP: 7.4
+ */
+
+namespace MT\Mcp;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+define( 'MT_MCP_VERSION', '1.3.0' );
+define( 'MT_MCP_FILE', __FILE__ );
+define( 'MT_MCP_PATH', plugin_dir_path( __FILE__ ) );
+define( 'MT_MCP_URL', plugin_dir_url( __FILE__ ) );
+
+require_once MT_MCP_PATH . 'classes/class-mcp-support.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-token-store.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-auth.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-oauth.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-seo.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-transfer.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-tool-handlers.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-server.php';
+require_once MT_MCP_PATH . 'classes/class-mcp-public.php';
+require_once MT_MCP_PATH . 'admin/class-admin.php';
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+	require_once MT_MCP_PATH . 'includes/class-mcp-cli.php';
+}
+
+/**
+ * Bootstrap.
+ */
+function boot() {
+	Migrator::maybe_migrate();
+	McpAuth::purge_legacy_key_options();
+	McpTokenStore::maybe_install();
+	new McpOAuth();
+	new McpServer();
+	new McpPublic();
+	if ( is_admin() ) {
+		new Admin();
+	}
+
+	// Local/dev hosts often use self-signed certs; schema + sitemap probes need this.
+	add_filter(
+		'mt_mcp_sslverify',
+		static function ( $verify, $url = '' ) {
+			$env = McpSupport::get_environment();
+			if ( in_array( $env, array( 'development', 'local', 'staging' ), true ) ) {
+				return false;
+			}
+			$host = (string) wp_parse_url( (string) $url, PHP_URL_HOST );
+			if ( $host && preg_match( '/(\.local$|\.test$|\.d\.mt\.com$|localhost|127\.0\.0\.1)/i', $host ) ) {
+				return false;
+			}
+			return $verify;
+		},
+		10,
+		2
+	);
+}
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\boot' );
+
+/**
+ * Activation: schema, flush rewrites, migrate options, purge shared keys.
+ */
+function activate() {
+	require_once MT_MCP_PATH . 'classes/class-mcp-support.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-token-store.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-auth.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-oauth.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-seo.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-transfer.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-tool-handlers.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-server.php';
+	require_once MT_MCP_PATH . 'classes/class-mcp-public.php';
+
+	Migrator::maybe_migrate();
+	McpAuth::purge_legacy_key_options();
+	McpTokenStore::install();
+
+	if ( ! get_option( McpSupport::OPTION_ENABLED ) ) {
+		update_option( McpSupport::OPTION_ENABLED, '1' );
+	}
+	if ( false === get_option( McpSupport::OPTION_ENVIRONMENT, false ) ) {
+		update_option( McpSupport::OPTION_ENVIRONMENT, 'unknown' );
+	}
+	if ( false === get_option( McpAuth::OPTION_AUTH_MODE, false ) ) {
+		update_option( McpAuth::OPTION_AUTH_MODE, 'oauth' );
+	}
+
+	McpServer::flush_rewrites_now();
+}
+register_activation_hook( __FILE__, __NAMESPACE__ . '\\activate' );
+
+/**
+ * Deactivation: clear rewrite flush flag.
+ */
+function deactivate() {
+	delete_option( McpSupport::OPTION_FLUSHED );
+	flush_rewrite_rules();
+}
+register_deactivation_hook( __FILE__, __NAMESPACE__ . '\\deactivate' );
+
+/**
+ * One-time migrate from mt-utilities MCP options (never migrates shared keys).
+ */
+class Migrator {
+
+	const FLAG = 'mt_mcp_migrated_from_utilities';
+
+	const FLAG_OAUTH_DEFAULT = 'mt_mcp_auth_default_oauth';
+
+	public static function maybe_migrate() {
+		// One-time: prefer OAuth-only over the earlier "both" default.
+		if ( ! get_option( self::FLAG_OAUTH_DEFAULT ) ) {
+			if ( 'both' === get_option( McpAuth::OPTION_AUTH_MODE, 'oauth' ) ) {
+				update_option( McpAuth::OPTION_AUTH_MODE, 'oauth' );
+			}
+			update_option( self::FLAG_OAUTH_DEFAULT, '1' );
+		}
+
+		if ( get_option( self::FLAG ) ) {
+			return;
+		}
+
+		$map = array(
+			'utility_plugin_mcp_enabled'      => McpSupport::OPTION_ENABLED,
+			'utility_plugin_mcp_allow_writes' => McpSupport::OPTION_ALLOW_WRITES,
+			'utility_plugin_mcp_environment'  => McpSupport::OPTION_ENVIRONMENT,
+			'utility_plugin_mcp_tool_groups'  => McpSupport::OPTION_TOOL_GROUPS,
+			'utility_plugin_mcp_audit_log'    => McpSupport::OPTION_AUDIT_LOG,
+		);
+
+		foreach ( $map as $old => $new ) {
+			if ( false === get_option( $new, false ) ) {
+				$val = get_option( $old, null );
+				if ( null !== $val && false !== $val ) {
+					update_option( $new, $val );
+				}
+			}
+		}
+
+		McpAuth::purge_legacy_key_options();
+		update_option( self::FLAG, '1' );
+	}
+}
