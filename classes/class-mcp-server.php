@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 use MT\Mcp\McpSupport;
 use MT\Mcp\McpToolHandlers;
 
@@ -441,6 +446,7 @@ You are connected to an MT WordPress site via mt-mcp. {$prod_note}
 {$user_note}
 
 Always start a session with get_site_context, then use list_post_types / list_acf_field_groups / get_acf_schema before editing structured content. Optionally call generate_cursor_skill and save the SKILL.md into the client repo.
+If get_site_context.connection.labeled is false, call set_connection_label with a human device name (e.g. "Cursor on MacBook" or "Claude Desktop") so admins can identify this grant.
 
 Workflow for content:
 1. search_posts or list_posts to find targets
@@ -454,7 +460,8 @@ Writes are currently {$writes}. Use get_site_health for install health; list_rev
 
 {$agents_block}{$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
 
-Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep, session_plan) or copy Recipes from Settings → MT MCP → Recipes.
+Use prompts (client_rollout, seo_pass, content_inventory, acf_gap_check, launch_prep, session_plan) or copy Recipes from Settings → MT MCP → Recipes.
+Use get_usage_insights to see top tools and recipe gaps from the audit log.
 Use resources site://context, site://agents, site://changelog, site://sitemap, menu://{location}, media://missing-alt, and acf://schema/{post_type} for quick context pulls.
 TXT;
 	}
@@ -473,6 +480,22 @@ TXT;
 					'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 				),
 				array( 'readOnlyHint' => true, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false )
+			),
+			$this->annotate_tool(
+				array(
+					'name'        => 'set_connection_label',
+					'description' => 'Set a human label for this MCP OAuth/App Password connection (shown in Settings → Active OAuth grants). Use device-style names like "Cursor on MacBook" or "Claude Desktop". Call early if get_site_context.connection.labeled is false. Pass label:"" to clear.',
+					'inputSchema' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'label'     => array( 'type' => 'string', 'description' => 'Human-readable label (max 120 chars).' ),
+							'client_id' => array( 'type' => 'string', 'description' => 'Optional; defaults to this session. Admins may target another client.' ),
+							'user_id'   => array( 'type' => 'integer', 'description' => 'Optional; admins only.' ),
+						),
+						'required'   => array( 'label' ),
+					),
+				),
+				array( 'readOnlyHint' => false, 'destructiveHint' => false, 'idempotentHint' => true, 'openWorldHint' => false )
 			),
 			array(
 				'name'        => 'get_site_docs',
@@ -1058,6 +1081,16 @@ TXT;
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array( 'limit' => array( 'type' => 'integer' ) ),
+				),
+			),
+			array(
+				'name'        => 'get_usage_insights',
+				'description' => 'Aggregate recent MCP audit entries: top tools, error rate, users, matched cookbook recipes, and recipe_gaps (frequent tools without recipe coverage). Use for rollout follow-up and cookbook ideas. Identifier-only; no latency yet.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit' => array( 'type' => 'integer', 'description' => 'Max recent audit rows to scan (default 500).' ),
+					),
 				),
 			),
 			array(
@@ -1846,6 +1879,7 @@ TXT;
 	private function handler_method( $name ) {
 		$map = array(
 			'get_site_context'      => 'get_site_context',
+			'set_connection_label'  => 'set_connection_label',
 			'get_site_docs'         => 'get_site_docs',
 			'update_site_docs'      => 'update_site_docs',
 			'list_post_types'       => 'list_post_types',
@@ -1928,6 +1962,7 @@ TXT;
 			'content_review'        => 'content_review',
 			'get_audit_log'          => 'get_audit_log',
 			'export_audit_log'       => 'export_audit_log',
+			'get_usage_insights'     => 'get_usage_insights',
 			'export_post'            => 'export_post',
 			'export_posts'           => 'export_posts',
 			'import_post'            => 'import_post',
@@ -2098,6 +2133,7 @@ TXT;
 		$goal      = isset( $arguments['goal'] ) ? $arguments['goal'] : '[describe what you want done]';
 
 		$id_map = array(
+			'client_rollout'    => 'client-rollout',
 			'seo_pass'          => 'seo-pass',
 			'content_inventory' => 'content-inventory',
 			'acf_gap_check'     => 'acf-gap-check',

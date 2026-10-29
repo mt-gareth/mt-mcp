@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Settings → MT MCP admin UI.
  */
@@ -13,6 +18,7 @@ class Admin {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
 		add_action( 'wp_ajax_mt_mcp_save_setting', array( $this, 'ajax_save_setting' ) );
+		add_action( 'wp_ajax_mt_mcp_save_grant_label', array( $this, 'ajax_save_grant_label' ) );
 		add_action( 'admin_post_mt_mcp_revoke_grant', array( $this, 'handle_revoke_grant' ) );
 		add_action( 'admin_post_mt_mcp_revoke_user', array( $this, 'handle_revoke_user' ) );
 		add_action( 'admin_post_mt_mcp_export_audit_csv', array( $this, 'handle_export_audit_csv' ) );
@@ -52,11 +58,34 @@ class Admin {
 			'mt-mcp-admin',
 			'mtMcpAdmin',
 			array(
-				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-				'nonce'   => wp_create_nonce( 'mt_mcp_save_setting' ),
-				'envLabels' => McpSupport::ENVIRONMENTS,
+				'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+				'nonce'       => wp_create_nonce( 'mt_mcp_save_setting' ),
+				'labelNonce'  => wp_create_nonce( 'mt_mcp_save_grant_label' ),
+				'envLabels'   => McpSupport::ENVIRONMENTS,
+				'i18n'        => array(
+					'copied' => __( 'Copied', 'mt-mcp' ),
+					'saved'  => __( 'Saved', 'mt-mcp' ),
+				),
 			)
 		);
+	}
+
+	/**
+	 * Save a human label for an OAuth grant (user + client).
+	 */
+	public function ajax_save_grant_label() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+		}
+		check_ajax_referer( 'mt_mcp_save_grant_label', 'nonce' );
+		$user_id   = isset( $_POST['user_id'] ) ? (int) $_POST['user_id'] : 0;
+		$client_id = isset( $_POST['client_id'] ) ? sanitize_text_field( wp_unslash( $_POST['client_id'] ) ) : '';
+		$label     = isset( $_POST['label'] ) ? sanitize_text_field( wp_unslash( $_POST['label'] ) ) : '';
+		if ( ! $user_id || '' === $client_id ) {
+			wp_send_json_error( array( 'message' => 'Missing user or client.' ), 400 );
+		}
+		$result = McpSupport::set_connection_label( $user_id, $client_id, $label );
+		wp_send_json_success( $result );
 	}
 
 	/**
@@ -176,6 +205,13 @@ class Admin {
 
 			case 'webhook_url':
 				$val = esc_url_raw( trim( (string) $raw ) );
+				if ( $val ) {
+					try {
+						$val = McpSupport::assert_safe_remote_url( $val );
+					} catch ( \Exception $e ) {
+						wp_send_json_error( array( 'message' => $e->getMessage() ), 400 );
+					}
+				}
 				update_option( McpSupport::OPTION_WEBHOOK_URL, $val );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
@@ -378,32 +414,33 @@ class Admin {
 		<?php endif; ?>
 
 		<section class="mt-mcp-card mt-mcp-card-hero">
-			<h2>Server URL</h2>
-			<p class="mt-mcp-help">Paste this into Claude’s connector settings (Custom connector URL).</p>
-			<div class="mt-mcp-code-wrap">
-				<input type="text" readonly class="mt-mcp-code" value="<?php echo esc_attr( $this->mcp_url() ); ?>" onclick="this.select();" />
-				<button type="button" class="button button-primary mt-mcp-copy" data-copy-target="prev"><?php esc_html_e( 'Copy URL', 'mt-mcp' ); ?></button>
+			<h2><?php esc_html_e( 'Server URL', 'mt-mcp' ); ?></h2>
+			<p class="mt-mcp-help"><?php esc_html_e( 'Paste into Claude’s custom connector URL, or any MCP client that takes a single endpoint.', 'mt-mcp' ); ?></p>
+			<div class="mt-mcp-copy-row">
+				<input type="text" readonly id="mt-mcp-server-url" class="mt-mcp-code mt-mcp-code-inline" value="<?php echo esc_attr( $this->mcp_url() ); ?>" onclick="this.select();" />
+				<button type="button" class="button button-primary button-small mt-mcp-copy" data-copy-target="#mt-mcp-server-url"><?php esc_html_e( 'Copy URL', 'mt-mcp' ); ?></button>
 			</div>
 		</section>
 
 		<section class="mt-mcp-card">
-			<h2>Cursor config</h2>
-			<p class="mt-mcp-help">Paste into Cursor’s <code>~/.cursor/mcp.json</code> or a project <code>.cursor/mcp.json</code>. On first connect, Cursor opens a browser to sign in as a WordPress user.</p>
-			<div class="mt-mcp-code-wrap">
-				<textarea readonly rows="9" class="mt-mcp-code mt-mcp-code-lg" onclick="this.select();"><?php echo esc_textarea( $this->oauth_config_json() ); ?></textarea>
-				<button type="button" class="button mt-mcp-copy" data-copy-target="prev"><?php esc_html_e( 'Copy', 'mt-mcp' ); ?></button>
+			<h2><?php esc_html_e( 'Cursor config', 'mt-mcp' ); ?></h2>
+			<p class="mt-mcp-help"><?php esc_html_e( 'Paste into ~/.cursor/mcp.json or a project .cursor/mcp.json. On first connect, Cursor opens a browser to sign in.', 'mt-mcp' ); ?></p>
+			<div class="mt-mcp-code-wrap mt-mcp-code-wrap--block">
+				<textarea readonly id="mt-mcp-cursor-json" rows="8" class="mt-mcp-code mt-mcp-code-lg" onclick="this.select();"><?php echo esc_textarea( $this->oauth_config_json() ); ?></textarea>
+				<button type="button" class="button mt-mcp-copy" data-copy-target="#mt-mcp-cursor-json"><?php esc_html_e( 'Copy JSON', 'mt-mcp' ); ?></button>
 			</div>
-			<p class="mt-mcp-help">Server key <code><?php echo esc_html( $server_key ); ?></code> is unique to this site so multiple WordPress MCPs don’t collide.</p>
+			<p class="mt-mcp-help"><?php esc_html_e( 'Server key', 'mt-mcp' ); ?> <code><?php echo esc_html( $server_key ); ?></code> <?php esc_html_e( 'is unique to this site so multiple WordPress MCPs don’t collide.', 'mt-mcp' ); ?></p>
 		</section>
 
 		<section class="mt-mcp-card">
-			<h2>Active OAuth grants</h2>
+			<h2><?php esc_html_e( 'Active OAuth grants', 'mt-mcp' ); ?></h2>
+			<p class="mt-mcp-help"><?php esc_html_e( 'Label each grant so you can tell devices apart (e.g. “Cursor on MacBook” vs “Claude Desktop”). Labels save when you leave the field. Agents call set_connection_label when unlabeled.', 'mt-mcp' ); ?></p>
 			<?php if ( empty( $grants ) ) : ?>
-				<p class="mt-mcp-help">No agents connected yet. Add the JSON above in Cursor, toggle the server on, then approve the consent screen.</p>
+				<p class="mt-mcp-help"><?php esc_html_e( 'No agents connected yet. Add the JSON above, enable the server, then approve the consent screen.', 'mt-mcp' ); ?></p>
 			<?php else : ?>
 				<?php $this->render_grants_table( $grants ); ?>
 			<?php endif; ?>
-			<p class="mt-mcp-help">To cut off an agent: Revoke here, and remove Application Passwords under Users → Profile. Uninstalling the plugin does not revoke App Passwords.</p>
+			<p class="mt-mcp-help"><?php esc_html_e( 'To cut off an agent: Revoke here, and remove Application Passwords under Users → Profile. Uninstall does not revoke App Passwords.', 'mt-mcp' ); ?></p>
 		</section>
 
 		<?php
@@ -451,32 +488,50 @@ class Admin {
 
 	private function render_grants_table( $grants ) {
 		?>
-		<table class="mt-mcp-table">
-			<thead>
-				<tr>
-					<th>User</th>
-					<th>Client</th>
-					<th>Scope</th>
-					<th>Expires</th>
-					<th></th>
-				</tr>
-			</thead>
-			<tbody>
-				<?php foreach ( $grants as $g ) : ?>
+		<div class="mt-mcp-table-scroll">
+			<table class="mt-mcp-table mt-mcp-grants-table">
+				<thead>
 					<tr>
-						<td><?php echo esc_html( $g['user_login'] ); ?></td>
-						<td><?php echo esc_html( $g['client_name'] ); ?></td>
-						<td><code><?php echo esc_html( $g['scope'] ); ?></code></td>
-						<td><?php echo esc_html( $g['expires'] ); ?></td>
-						<td>
-							<a class="button button-small"
-							   href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_revoke_grant&hash=' . rawurlencode( $g['hash'] ) ), 'mt_mcp_revoke_grant' ) ); ?>"
-							   onclick="return confirm('Revoke this grant?');">Revoke</a>
-						</td>
+						<th><?php esc_html_e( 'Label', 'mt-mcp' ); ?></th>
+						<th><?php esc_html_e( 'User', 'mt-mcp' ); ?></th>
+						<th><?php esc_html_e( 'Client', 'mt-mcp' ); ?></th>
+						<th><?php esc_html_e( 'Scope', 'mt-mcp' ); ?></th>
+						<th><?php esc_html_e( 'Expires', 'mt-mcp' ); ?></th>
+						<th></th>
 					</tr>
-				<?php endforeach; ?>
-			</tbody>
-		</table>
+				</thead>
+				<tbody>
+					<?php foreach ( $grants as $g ) :
+						$expires_ts = strtotime( $g['expires'] );
+						$expires_h  = $expires_ts ? gmdate( 'Y-m-d', $expires_ts ) : $g['expires'];
+						?>
+						<tr data-user-id="<?php echo esc_attr( (string) $g['user_id'] ); ?>" data-client-id="<?php echo esc_attr( $g['client_id'] ); ?>">
+							<td class="mt-mcp-grant-label-cell">
+								<input type="text"
+									class="mt-mcp-grant-label"
+									maxlength="120"
+									placeholder="<?php esc_attr_e( 'e.g. Cursor on MacBook', 'mt-mcp' ); ?>"
+									value="<?php echo esc_attr( isset( $g['label'] ) ? $g['label'] : '' ); ?>"
+									data-saved="<?php echo esc_attr( isset( $g['label'] ) ? $g['label'] : '' ); ?>"
+									aria-label="<?php esc_attr_e( 'Connection label', 'mt-mcp' ); ?>" />
+								<span class="mt-mcp-grant-label-status" aria-live="polite"></span>
+							</td>
+							<td><?php echo esc_html( $g['user_login'] ); ?></td>
+							<td>
+								<span class="mt-mcp-grant-client" title="<?php echo esc_attr( $g['client_id'] ); ?>"><?php echo esc_html( $g['client_name'] ); ?></span>
+							</td>
+							<td><code class="mt-mcp-scope"><?php echo esc_html( $g['scope'] ); ?></code></td>
+							<td><time datetime="<?php echo esc_attr( $g['expires'] ); ?>" title="<?php echo esc_attr( $g['expires'] ); ?>"><?php echo esc_html( $expires_h ); ?></time></td>
+							<td class="mt-mcp-grant-actions">
+								<a class="button button-small"
+								   href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_revoke_grant&hash=' . rawurlencode( $g['hash'] ) ), 'mt_mcp_revoke_grant' ) ); ?>"
+								   onclick="return confirm('Revoke this grant?');"><?php esc_html_e( 'Revoke', 'mt-mcp' ); ?></a>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		</div>
 		<?php
 	}
 
@@ -906,9 +961,64 @@ class Admin {
 	}
 
 	private function render_activity() {
-		$log = McpSupport::get_audit_log( 50 );
-		$csv = wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_export_audit_csv' ), 'mt_mcp_export_audit_csv' );
+		$log      = McpSupport::get_audit_log( 50 );
+		$insights = McpSupport::usage_insights( 500 );
+		$csv      = wp_nonce_url( admin_url( 'admin-post.php?action=mt_mcp_export_audit_csv' ), 'mt_mcp_export_audit_csv' );
 		?>
+		<section class="mt-mcp-card">
+			<h2>Usage insights</h2>
+			<p class="mt-mcp-help">From the last <?php echo (int) $insights['scanned']; ?> audit rows. Agents can also call <code>get_usage_insights</code>. Latency is not recorded yet.</p>
+			<?php if ( empty( $insights['top_tools'] ) ) : ?>
+				<p class="mt-mcp-help">No activity yet — insights appear after agents call tools.</p>
+			<?php else : ?>
+				<p class="mt-mcp-help">
+					OK <?php echo (int) $insights['ok']; ?>
+					· Fail <?php echo (int) $insights['fail']; ?>
+					· Error rate <?php echo esc_html( (string) round( 100 * (float) $insights['error_rate'], 1 ) ); ?>%
+				</p>
+				<table class="mt-mcp-table">
+					<thead>
+						<tr>
+							<th>Tool</th>
+							<th>Calls</th>
+							<th>OK</th>
+							<th>Fail</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( array_slice( $insights['top_tools'], 0, 15 ) as $row ) : ?>
+							<tr>
+								<td><code><?php echo esc_html( $row['tool'] ); ?></code></td>
+								<td><?php echo (int) $row['calls']; ?></td>
+								<td><?php echo (int) $row['ok']; ?></td>
+								<td><?php echo (int) $row['fail']; ?></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<?php if ( ! empty( $insights['matched_recipes'] ) ) : ?>
+					<h3>Matched recipes</h3>
+					<ul class="mt-mcp-help">
+						<?php foreach ( array_slice( $insights['matched_recipes'], 0, 12 ) as $m ) : ?>
+							<li>
+								<strong><?php echo esc_html( $m['title'] ); ?></strong>
+								— tools: <code><?php echo esc_html( implode( ', ', isset( $m['matched_tools'] ) ? $m['matched_tools'] : array() ) ); ?></code>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				<?php endif; ?>
+				<?php if ( ! empty( $insights['recipe_gaps'] ) ) : ?>
+					<h3>Recipe gaps</h3>
+					<p class="mt-mcp-help">Frequent tools with weak cookbook coverage — candidates for new Recipes.</p>
+					<ul class="mt-mcp-help">
+						<?php foreach ( $insights['recipe_gaps'] as $g ) : ?>
+							<li><code><?php echo esc_html( $g['tool'] ); ?></code> (<?php echo (int) $g['calls']; ?> calls)</li>
+						<?php endforeach; ?>
+					</ul>
+				<?php endif; ?>
+			<?php endif; ?>
+		</section>
+
 		<section class="mt-mcp-card">
 			<h2>Recent tool calls</h2>
 			<p class="mt-mcp-help">HMAC-signed ring buffer (last <?php echo (int) McpSupport::AUDIT_MAX_ENTRIES; ?>). <a class="button button-small" href="<?php echo esc_url( $csv ); ?>">Export CSV</a></p>
@@ -995,8 +1105,9 @@ class Admin {
 			wp_die( 'Insufficient permissions.' );
 		}
 		check_admin_referer( 'mt_mcp_simulate_tool' );
-		$tool = isset( $_POST['tool'] ) ? sanitize_key( wp_unslash( $_POST['tool'] ) ) : '';
-		$args = array();
+		$allowed = array( 'get_site_context', 'list_post_types', 'seo_audit', 'content_review', 'get_site_health', 'suggest_internal_links', 'get_usage_insights', 'connection_doctor' );
+		$tool    = isset( $_POST['tool'] ) ? sanitize_key( wp_unslash( $_POST['tool'] ) ) : '';
+		$args    = array();
 		if ( ! empty( $_POST['args_json'] ) ) {
 			$decoded = json_decode( wp_unslash( $_POST['args_json'] ), true );
 			if ( is_array( $decoded ) ) {
@@ -1005,7 +1116,7 @@ class Admin {
 		}
 		$handlers = new McpToolHandlers();
 		try {
-			if ( ! method_exists( $handlers, $tool ) ) {
+			if ( ! in_array( $tool, $allowed, true ) || ! method_exists( $handlers, $tool ) ) {
 				throw new \Exception( 'Unknown or non-simulatable tool.' );
 			}
 			$result = call_user_func( array( $handlers, $tool ), $args );

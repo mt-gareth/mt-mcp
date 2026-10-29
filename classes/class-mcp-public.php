@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Public (unauthenticated) endpoints used by agents for client-facing flows:
  * signed draft preview links and one-shot media upload URLs.
@@ -97,6 +102,7 @@ class McpPublic {
 			'filename'       => isset( $args['filename'] ) ? sanitize_file_name( $args['filename'] ) : '',
 			'parent_post_id' => isset( $args['parent_post_id'] ) ? (int) $args['parent_post_id'] : 0,
 			'max_bytes'      => $max_bytes,
+			'allow_svg'      => ! empty( $args['allow_svg'] ),
 			'exp'            => time() + $ttl,
 			'user_id'        => get_current_user_id(),
 			'used'           => false,
@@ -363,6 +369,24 @@ class McpPublic {
 
 			if ( ! empty( $data['user_id'] ) ) {
 				wp_set_current_user( (int) $data['user_id'] );
+			}
+
+			$mime_guess = '';
+			if ( function_exists( 'mime_content_type' ) ) {
+				$mime_guess = (string) @mime_content_type( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+			}
+			$bytes_head = (string) file_get_contents( $tmp, false, null, 0, 4096 );
+			if ( McpSupport::looks_like_svg( $filename, $mime_guess, $bytes_head ) ) {
+				if ( empty( $data['allow_svg'] ) ) {
+					@unlink( $tmp ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+					throw new \Exception( 'SVG uploads require allow_svg on prepare_media_upload (content is sanitized).' );
+				}
+				$raw   = (string) file_get_contents( $tmp );
+				$clean = McpSupport::sanitize_svg_bytes( $raw );
+				file_put_contents( $tmp, $clean ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+				if ( ! preg_match( '/\.svg$/i', $filename ) ) {
+					$filename = pathinfo( $filename, PATHINFO_FILENAME ) . '.svg';
+				}
 			}
 
 			$id = media_handle_sideload(

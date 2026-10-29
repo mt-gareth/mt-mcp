@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Request authentication for the MCP resource server.
  *
@@ -19,6 +24,20 @@ class McpAuth {
 	const SCOPE_WRITE = 'mcp:write';
 
 	/**
+	 * Last successful auth context for this request (client_id, scope, method).
+	 *
+	 * @var array<string,mixed>|null
+	 */
+	private static $current_auth = null;
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public static function current_auth() {
+		return is_array( self::$current_auth ) ? self::$current_auth : array();
+	}
+
+	/**
 	 * @return array{ok:bool,scope?:string,user_id?:int,method?:string,error?:string,www_authenticate?:string}
 	 */
 	public static function authenticate( $required_scope = 'read' ) {
@@ -28,7 +47,14 @@ class McpAuth {
 		if ( $token ) {
 			if ( in_array( $mode, array( 'oauth', 'both' ), true ) ) {
 				$oauth = McpOAuth::validate_access_token( $token );
-				if ( $oauth['ok'] ) {
+				if ( ! empty( $oauth['ok'] ) ) {
+					if ( isset( $oauth['audience_ok'] ) && ! $oauth['audience_ok'] ) {
+						return array(
+							'ok'               => false,
+							'error'            => 'Token audience does not match this MCP resource.',
+							'www_authenticate' => self::www_authenticate_header(),
+						);
+					}
 					return self::finalize( $oauth, $required_scope );
 				}
 			}
@@ -150,6 +176,7 @@ class McpAuth {
 			'get_options'              => 'manage_options',
 			'get_audit_log'            => 'manage_options',
 			'export_audit_log'         => 'manage_options',
+			'get_usage_insights'       => 'manage_options',
 			'list_changes'             => 'edit_posts',
 			'get_change'               => 'edit_posts',
 			'undo_change'              => 'edit_posts',
@@ -167,6 +194,10 @@ class McpAuth {
 			'run_smoke_checks'         => 'update_plugins',
 			'finish_update_session'    => 'update_plugins',
 			'confirm_update_ok'        => 'update_plugins',
+			'connection_doctor'        => 'manage_options',
+			'dedupe_attachments'       => 'upload_files',
+			'sitemap_diff'             => 'edit_posts',
+			'set_connection_label'     => 'read',
 		);
 
 		$cap = isset( $map[ $tool_name ] ) ? $map[ $tool_name ] : 'read';
@@ -199,12 +230,15 @@ class McpAuth {
 			);
 		}
 
-		return array(
-			'ok'      => true,
-			'scope'   => $scope,
-			'user_id' => $user_id,
-			'method'  => isset( $auth['method'] ) ? $auth['method'] : 'unknown',
+		$out = array(
+			'ok'        => true,
+			'scope'     => $scope,
+			'user_id'   => $user_id,
+			'method'    => isset( $auth['method'] ) ? $auth['method'] : 'unknown',
+			'client_id' => isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '',
 		);
+		self::$current_auth = $out;
+		return $out;
 	}
 
 	public static function extract_bearer_token() {

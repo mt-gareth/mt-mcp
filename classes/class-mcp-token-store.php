@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Custom-table storage for OAuth clients, auth codes, and tokens.
  * Scales past wp_options for busy sites.
@@ -254,13 +259,16 @@ class McpTokenStore {
 		foreach ( (array) $rows as $row ) {
 			$client = self::get_client( $row['client_id'] );
 			$user   = get_userdata( (int) $row['user_id'] );
-			$out[]  = array(
+			$client_id   = $row['client_id'];
+			$client_name = $client ? $client['client_name'] : $row['client_id'];
+			$out[]       = array(
 				'hash'        => substr( $row['token_hash'], 0, 12 ),
 				'token_hash'  => $row['token_hash'],
 				'user_id'     => (int) $row['user_id'],
 				'user_login'  => $user ? $user->user_login : '(deleted)',
-				'client_id'   => $row['client_id'],
-				'client_name' => $client ? $client['client_name'] : $row['client_id'],
+				'client_id'   => $client_id,
+				'client_name' => $client_name,
+				'label'       => McpSupport::get_connection_label( (int) $row['user_id'], $client_id ),
 				'scope'       => $row['scope'],
 				'expires'     => gmdate( 'c', (int) $row['expires_at'] ),
 			);

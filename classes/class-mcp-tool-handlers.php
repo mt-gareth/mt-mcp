@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Implementations for every MCP tool exposed by McpServer.
  */
@@ -44,6 +49,7 @@ class McpToolHandlers {
 				'plugin'    => 'mt-mcp',
 			),
 			'auth'              => $auth,
+			'connection'        => McpSupport::current_connection_info(),
 			'theme'             => array(
 				'name'    => $theme->get( 'Name' ),
 				'version' => $theme->get( 'Version' ),
@@ -85,6 +91,47 @@ class McpToolHandlers {
 		);
 	}
 
+
+	/**
+	 * Label this OAuth/App Password connection for the Active grants table.
+	 * Args: label (required), client_id? (defaults to current session), user_id? (admins only).
+	 */
+	public function set_connection_label( $args = array() ) {
+		$label = isset( $args['label'] ) ? trim( (string) $args['label'] ) : '';
+		if ( '' === $label && ! array_key_exists( 'label', $args ) ) {
+			throw new \Exception( 'Provide label, e.g. "Cursor on MacBook" or "Claude Desktop". Pass label:"" to clear.' );
+		}
+		$auth      = McpAuth::current_auth();
+		$user_id   = get_current_user_id();
+		$client_id = isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '';
+		if ( isset( $args['client_id'] ) && '' !== (string) $args['client_id'] ) {
+			if ( ! current_user_can( 'manage_options' ) && (string) $args['client_id'] !== $client_id ) {
+				throw new \Exception( 'Only admins can label another client_id.' );
+			}
+			$client_id = (string) $args['client_id'];
+		}
+		if ( isset( $args['user_id'] ) && (int) $args['user_id'] > 0 ) {
+			if ( ! current_user_can( 'manage_options' ) ) {
+				throw new \Exception( 'Only admins can label another user\'s connection.' );
+			}
+			$user_id = (int) $args['user_id'];
+		}
+		if ( ! $client_id && isset( $auth['method'] ) && 'application_password' === $auth['method'] ) {
+			$client_id = 'app';
+		}
+		if ( ! $user_id ) {
+			throw new \Exception( 'No authenticated user.' );
+		}
+		if ( ! $client_id ) {
+			throw new \Exception( 'Could not resolve client_id for this session. Pass client_id from get_site_context.connection.' );
+		}
+		$result = McpSupport::set_connection_label( $user_id, $client_id, $label );
+		$result['connection'] = McpSupport::current_connection_info();
+		$result['message']    = '' === $label
+			? 'Label cleared.'
+			: 'Label saved. It appears under Settings → MT MCP → Active OAuth grants.';
+		return $result;
+	}
 
 	public function get_site_docs( $args = array() ) {
 		$which = isset( $args['doc'] ) ? sanitize_key( $args['doc'] ) : 'both';
@@ -2484,6 +2531,15 @@ class McpToolHandlers {
 	}
 
 	/**
+	 * Aggregate audit for top tools + recipe gap ideas.
+	 * Args: limit? (default 500, max AUDIT_MAX_ENTRIES)
+	 */
+	public function get_usage_insights( $args = array() ) {
+		$limit = isset( $args['limit'] ) ? (int) $args['limit'] : 500;
+		return McpSupport::usage_insights( $limit );
+	}
+
+	/**
 	 * Upload media from a remote URL or base64 payload.
 	 * Args: url? | data_base64? + filename?, title?, alt?, caption?, description?, dry_run?
 	 */
@@ -3048,7 +3104,7 @@ MD;
 		$total       = 0;
 
 		if ( 'sitemap' === $source ) {
-			$sitemap_url = ! empty( $args['sitemap_url'] ) ? esc_url_raw( $args['sitemap_url'] ) : '';
+			$sitemap_url = ! empty( $args['sitemap_url'] ) ? McpSupport::assert_safe_fetch_url( $args['sitemap_url'] ) : '';
 			$fetched_body = '';
 			if ( ! $sitemap_url ) {
 				$candidates = array(
@@ -3061,7 +3117,7 @@ MD;
 						$cand,
 						array(
 							'timeout'     => 8,
-							'redirection' => 2,
+							'redirection' => 0,
 							'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $cand ),
 						)
 					);
@@ -3079,7 +3135,7 @@ MD;
 					$sitemap_url,
 					array(
 						'timeout'     => 8,
-						'redirection' => 2,
+						'redirection' => 0,
 						'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $sitemap_url ),
 					)
 				);
@@ -3103,11 +3159,16 @@ MD;
 					if ( ! preg_match( '/\.xml(\.gz)?(\?|$)/i', $child ) ) {
 						continue;
 					}
+					try {
+						$child = McpSupport::assert_safe_fetch_url( $child );
+					} catch ( \Exception $e ) {
+						continue;
+					}
 					$cprobe = wp_remote_get(
 						$child,
 						array(
 							'timeout'     => 8,
-							'redirection' => 2,
+							'redirection' => 0,
 							'sslverify'   => apply_filters( 'mt_mcp_sslverify', true, $child ),
 						)
 					);
@@ -3158,6 +3219,12 @@ MD;
 			}
 			if ( null === $ssl ) {
 				$ssl = apply_filters( 'mt_mcp_sslverify', true, $url );
+			}
+			try {
+				$url = McpSupport::assert_safe_fetch_url( $url );
+			} catch ( \Exception $e ) {
+				$issues[] = array( 'id' => $id, 'url' => $url, 'issue' => 'unsafe_url', 'detail' => $e->getMessage() );
+				continue;
 			}
 			$checked++;
 			$method   = $check_body ? 'GET' : 'HEAD';
@@ -3479,7 +3546,12 @@ MD;
 	}
 
 	public function dedupe_attachments( $args = array() ) {
-		$dry_run = ! empty( $args['dry_run'] );
+		// Default dry-run; permanent deletes require apply + high-risk lock.
+		$apply   = ! empty( $args['apply'] ) && empty( $args['dry_run'] );
+		$dry_run = ! $apply;
+		if ( $apply ) {
+			McpSupport::assert_high_risk_allowed( 'dedupe_attachments' );
+		}
 		global $wpdb;
 		$rows = $wpdb->get_results(
 			"SELECT meta_value AS sha, COUNT(*) AS c, GROUP_CONCAT(post_id) AS ids
@@ -3499,13 +3571,19 @@ MD;
 				'keep_id'  => $keep,
 				'duplicate_ids' => $ids,
 			);
-			if ( ! $dry_run ) {
+			if ( $apply ) {
 				foreach ( $ids as $dup ) {
+					McpSupport::assert_can_delete_post( $dup );
 					wp_delete_attachment( $dup, true );
 				}
 			}
 		}
-		return array( 'dry_run' => $dry_run, 'groups' => $groups );
+		return array(
+			'dry_run' => $dry_run,
+			'apply'   => $apply,
+			'groups'  => $groups,
+			'hint'    => $dry_run ? 'Re-call with apply:true (and Allow high-risk destructive ops) to permanently delete duplicates.' : null,
+		);
 	}
 
 	public function export_audit_log( $args = array() ) {
@@ -3522,6 +3600,7 @@ MD;
 		if ( ! $url ) {
 			throw new \Exception( 'No webhook URL configured in Settings → MT MCP.' );
 		}
+		$url = McpSupport::assert_safe_remote_url( $url );
 		$user = wp_get_current_user();
 		$payload = array(
 			'event'       => 'mt_mcp.write_batch',
@@ -4300,10 +4379,23 @@ MD;
 
 	public function list_changes( $args = array() ) {
 		$limit   = isset( $args['limit'] ) ? max( 1, min( 50, (int) $args['limit'] ) ) : 20;
-		$entries = McpSupport::get_undo_journal( $limit );
+		$entries = McpSupport::get_undo_journal( max( $limit * 3, 50 ) );
 		$items   = array();
+		$uid     = get_current_user_id();
+		$is_admin = current_user_can( 'manage_options' );
 		foreach ( $entries as $entry ) {
+			if ( ! $is_admin && ( empty( $entry['user_id'] ) || (int) $entry['user_id'] !== (int) $uid ) ) {
+				continue;
+			}
+			try {
+				McpSupport::assert_can_access_change( $entry, false );
+			} catch ( \Exception $e ) {
+				continue;
+			}
 			$items[] = McpSupport::summarize_change( $entry, false );
+			if ( count( $items ) >= $limit ) {
+				break;
+			}
 		}
 		return array(
 			'items' => $items,
@@ -4321,6 +4413,7 @@ MD;
 		if ( ! $entry ) {
 			throw new \Exception( 'Change not found or expired.' );
 		}
+		McpSupport::assert_can_access_change( $entry, false );
 		return McpSupport::summarize_change( $entry, true );
 	}
 
@@ -4333,6 +4426,7 @@ MD;
 		if ( ! $entry ) {
 			throw new \Exception( 'Change not found or expired (72h TTL).' );
 		}
+		McpSupport::assert_can_access_change( $entry, true );
 		if ( ! empty( $entry['undone'] ) ) {
 			throw new \Exception( 'This change was already undone.' );
 		}
@@ -4657,13 +4751,17 @@ MD;
 		if ( ! in_array( $post->post_status, array( 'publish', 'private' ), true ) && empty( $args['preview_url'] ) ) {
 			throw new \Exception( 'Post is not publicly viewable. Publish first, or pass preview_url from create_draft_preview.' );
 		}
-		$fetch_url = ! empty( $args['preview_url'] ) ? esc_url_raw( $args['preview_url'] ) : $url;
+		if ( ! empty( $args['preview_url'] ) ) {
+			$fetch_url = McpSupport::assert_safe_fetch_url( $args['preview_url'] );
+		} else {
+			$fetch_url = $url;
+		}
 		$ssl = apply_filters( 'mt_mcp_sslverify', true, $fetch_url );
 		$res = wp_remote_get(
 			$fetch_url,
 			array(
 				'timeout'     => 15,
-				'redirection' => 3,
+				'redirection' => 0,
 				'sslverify'   => $ssl,
 				'headers'     => array( 'User-Agent' => 'MT-MCP-diff_public_html/' . ( defined( 'MT_MCP_VERSION' ) ? MT_MCP_VERSION : '1' ) ),
 			)

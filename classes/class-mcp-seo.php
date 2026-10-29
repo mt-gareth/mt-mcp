@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Multi-provider SEO field adapter (Yoast, Rank Math, SEOPress).
  */

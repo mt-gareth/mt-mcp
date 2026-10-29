@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Shared helpers for the MCP server: auth scopes, tool-group allowlists,
  * audit log, allowlisted options, Yoast/ACF helpers, and before/after diffs.
@@ -28,6 +33,7 @@ class McpSupport {
 	const OPTION_OP_RECEIPTS = 'mt_mcp_op_receipts';
 	const OPTION_UNDO_JOURNAL = 'mt_mcp_undo_journal';
 	const OPTION_ALLOW_UPDATES = 'mt_mcp_allow_updates';
+	const OPTION_CONNECTION_LABELS = 'mt_mcp_connection_labels';
 	const AUDIT_MAX_ENTRIES   = 200;
 	const UNDO_MAX_ENTRIES    = 50;
 	const UNDO_TTL_SECONDS    = 259200; // 72 hours
@@ -115,6 +121,7 @@ class McpSupport {
 		'confirm_update_ok',
 		'flush_caches',
 		'update_site_docs',
+		'dedupe_attachments',
 	);
 
 	/**
@@ -228,6 +235,7 @@ class McpSupport {
 			'revoke_draft_preview'   => 'content',
 			'get_audit_log'          => 'audit',
 			'export_audit_log'       => 'audit',
+			'get_usage_insights'     => 'audit',
 			'export_post'            => 'transfer',
 			'export_posts'           => 'transfer',
 			'import_post'            => 'transfer',
@@ -243,6 +251,7 @@ class McpSupport {
 			'flush_caches'           => 'system',
 			'get_site_health'        => 'system',
 			'connection_doctor'      => 'system',
+			'set_connection_label'   => 'system',
 			'manage_connections'     => 'system',
 			'list_needs_review'      => 'content',
 			'review_draft'           => 'content',
@@ -340,7 +349,8 @@ class McpSupport {
 	public static function tool_allowed( $tool ) {
 		$group = self::group_for_tool( $tool );
 		if ( ! $group ) {
-			return true;
+			// Fail closed: unmapped tools must not slip past group gates.
+			return false;
 		}
 		$groups = self::enabled_groups();
 		return ! empty( $groups[ $group ] );
@@ -476,6 +486,123 @@ class McpSupport {
 		}
 		$limit = max( 1, min( (int) $limit, self::AUDIT_MAX_ENTRIES ) );
 		return array_slice( array_reverse( $log ), 0, $limit );
+	}
+
+	/**
+	 * Aggregate audit log for usage insights + recipe gap suggestions.
+	 * No per-call latency today (audit rows are ts/tool/ok only).
+	 *
+	 * @param int $limit Max recent entries to scan (1–AUDIT_MAX_ENTRIES).
+	 * @return array<string,mixed>
+	 */
+	public static function usage_insights( $limit = 500 ) {
+		$limit   = max( 1, min( (int) $limit, self::AUDIT_MAX_ENTRIES ) );
+		$entries = self::get_audit_log( $limit );
+		$by_tool = array();
+		$users   = array();
+		$ok_n    = 0;
+		$fail_n  = 0;
+		$oldest  = null;
+		$newest  = null;
+
+		foreach ( $entries as $row ) {
+			$tool = isset( $row['tool'] ) ? (string) $row['tool'] : '';
+			if ( '' === $tool ) {
+				continue;
+			}
+			if ( ! isset( $by_tool[ $tool ] ) ) {
+				$by_tool[ $tool ] = array(
+					'tool'   => $tool,
+					'calls'  => 0,
+					'ok'     => 0,
+					'fail'   => 0,
+					'users'  => array(),
+				);
+			}
+			$by_tool[ $tool ]['calls']++;
+			if ( ! empty( $row['ok'] ) ) {
+				$by_tool[ $tool ]['ok']++;
+				$ok_n++;
+			} else {
+				$by_tool[ $tool ]['fail']++;
+				$fail_n++;
+			}
+			$user = isset( $row['user'] ) ? (string) $row['user'] : '';
+			if ( $user ) {
+				$by_tool[ $tool ]['users'][ $user ] = true;
+				$users[ $user ]                     = isset( $users[ $user ] ) ? $users[ $user ] + 1 : 1;
+			}
+			$ts = isset( $row['ts'] ) ? (string) $row['ts'] : '';
+			if ( $ts ) {
+				if ( null === $newest || strcmp( $ts, $newest ) > 0 ) {
+					$newest = $ts;
+				}
+				if ( null === $oldest || strcmp( $ts, $oldest ) < 0 ) {
+					$oldest = $ts;
+				}
+			}
+		}
+
+		$top = array_values( $by_tool );
+		usort(
+			$top,
+			function ( $a, $b ) {
+				return $b['calls'] - $a['calls'];
+			}
+		);
+		foreach ( $top as &$row ) {
+			$row['users'] = array_keys( $row['users'] );
+		}
+		unset( $row );
+
+		$tool_names = array_map(
+			function ( $r ) {
+				return $r['tool'];
+			},
+			$top
+		);
+		$matched = array();
+		if ( class_exists( __NAMESPACE__ . '\\McpRecipes' ) ) {
+			$matched = McpRecipes::suggest_for_tools( $tool_names );
+		}
+
+		$covered = array();
+		foreach ( $matched as $m ) {
+			foreach ( isset( $m['matched_tools'] ) ? $m['matched_tools'] : array() as $t ) {
+				$covered[ $t ] = true;
+			}
+		}
+		$gaps = array();
+		foreach ( array_slice( $top, 0, 25 ) as $row ) {
+			if ( empty( $covered[ $row['tool'] ] ) && $row['calls'] >= 2 ) {
+				$gaps[] = array(
+					'tool'             => $row['tool'],
+					'calls'            => $row['calls'],
+					'suggested_recipe' => 'Add cookbook recipe covering `' . $row['tool'] . '`',
+				);
+			}
+		}
+
+		arsort( $users );
+
+		return array(
+			'scanned'          => count( $entries ),
+			'ok'               => $ok_n,
+			'fail'             => $fail_n,
+			'error_rate'       => ( $ok_n + $fail_n ) > 0 ? round( $fail_n / ( $ok_n + $fail_n ), 4 ) : 0,
+			'window'           => array(
+				'oldest' => $oldest,
+				'newest' => $newest,
+			),
+			'top_tools'        => array_slice( $top, 0, 30 ),
+			'by_user'          => $users,
+			'matched_recipes'  => $matched,
+			'recipe_gaps'      => $gaps,
+			'notes'            => array(
+				'Audit is identifier-only (no bodies/emails). Latency is not recorded yet.',
+				'Use recipe_gaps + matched_recipes to grow the cookbook from real sessions.',
+			),
+		);
 	}
 
 	public static function allowed_option_keys() {
@@ -1153,6 +1280,64 @@ class McpSupport {
 		return $url;
 	}
 
+	/**
+	 * Safe outbound GET for probes (sitemap, public HTML). Same-host http(s) allowed; else https + no private IPs.
+	 *
+	 * @param string $url URL to fetch.
+	 * @return string Sanitized URL.
+	 */
+	public static function assert_safe_fetch_url( $url ) {
+		$url = esc_url_raw( (string) $url );
+		if ( ! $url ) {
+			throw new \Exception( 'Invalid URL.' );
+		}
+		$parts = wp_parse_url( $url );
+		if ( empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+			throw new \Exception( 'URL must include scheme and host.' );
+		}
+		$scheme    = strtolower( $parts['scheme'] );
+		$host      = strtolower( $parts['host'] );
+		$site_host = strtolower( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+		if ( $site_host && $host === $site_host && in_array( $scheme, array( 'http', 'https' ), true ) ) {
+			return $url;
+		}
+		return self::assert_safe_remote_url( $url );
+	}
+
+	/**
+	 * Object-level gate for undo journal entries (snapshots may contain private content).
+	 *
+	 * @param array $entry Journal entry.
+	 * @param bool  $need_edit Require edit_post (undo) vs read_post (inspect).
+	 */
+	public static function assert_can_access_change( $entry, $need_edit = false ) {
+		if ( current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$written = self::unpack_snapshot( isset( $entry['written_pack'] ) ? $entry['written_pack'] : '' );
+		if ( ! is_array( $written ) ) {
+			$written = self::unpack_snapshot( isset( $entry['before_pack'] ) ? $entry['before_pack'] : '' );
+		}
+		if ( is_array( $written ) && ! empty( $written['kind'] ) ) {
+			if ( in_array( $written['kind'], array( 'post', 'media' ), true ) && ! empty( $written['id'] ) ) {
+				$id = (int) $written['id'];
+				if ( $need_edit ) {
+					self::assert_can_edit_post( $id );
+				} else {
+					self::assert_can_read_post( $id );
+				}
+				return;
+			}
+			if ( 'options_page' === $written['kind'] ) {
+				throw new \Exception( 'Options-page changes require manage_options.' );
+			}
+		}
+		$uid = get_current_user_id();
+		if ( empty( $entry['user_id'] ) || (int) $entry['user_id'] !== (int) $uid ) {
+			throw new \Exception( 'You cannot access this change.' );
+		}
+	}
+
 	public static function is_private_ip( $ip ) {
 		if ( ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
 			return true;
@@ -1166,6 +1351,112 @@ class McpSupport {
 
 	public static function is_undoable_tool( $tool ) {
 		return in_array( $tool, self::UNDOABLE_TOOLS, true );
+	}
+
+	/**
+	 * Stable key for an OAuth (or app-password) connection label.
+	 *
+	 * @param int    $user_id   WP user id.
+	 * @param string $client_id OAuth client id, or "app" / empty for Application Passwords.
+	 * @return string
+	 */
+	public static function connection_label_key( $user_id, $client_id = '' ) {
+		$user_id   = (int) $user_id;
+		$client_id = trim( (string) $client_id );
+		if ( '' === $client_id ) {
+			$client_id = 'app';
+		}
+		return md5( $user_id . '|' . $client_id );
+	}
+
+	/**
+	 * @return array<string,array{label:string,updated_at:string,updated_by:string}>
+	 */
+	public static function connection_labels() {
+		$stored = get_option( self::OPTION_CONNECTION_LABELS, array() );
+		return is_array( $stored ) ? $stored : array();
+	}
+
+	/**
+	 * @param int    $user_id   User.
+	 * @param string $client_id Client id.
+	 * @return string
+	 */
+	public static function get_connection_label( $user_id, $client_id = '' ) {
+		$key  = self::connection_label_key( $user_id, $client_id );
+		$all  = self::connection_labels();
+		$row  = isset( $all[ $key ] ) ? $all[ $key ] : null;
+		return ( is_array( $row ) && ! empty( $row['label'] ) ) ? (string) $row['label'] : '';
+	}
+
+	/**
+	 * @param int    $user_id   User.
+	 * @param string $client_id Client id.
+	 * @param string $label     Human label (e.g. "Cursor on MacBook").
+	 * @return array{key:string,label:string,updated_at:string}
+	 */
+	public static function set_connection_label( $user_id, $client_id, $label ) {
+		$user_id = (int) $user_id;
+		$label   = sanitize_text_field( (string) $label );
+		$label   = substr( $label, 0, 120 );
+		$key     = self::connection_label_key( $user_id, $client_id );
+		$all     = self::connection_labels();
+		$user    = wp_get_current_user();
+		if ( '' === $label ) {
+			unset( $all[ $key ] );
+		} else {
+			$all[ $key ] = array(
+				'label'      => $label,
+				'user_id'    => $user_id,
+				'client_id'  => (string) $client_id,
+				'updated_at' => gmdate( 'c' ),
+				'updated_by' => $user && $user->ID ? $user->user_login : '',
+			);
+		}
+		update_option( self::OPTION_CONNECTION_LABELS, $all, false );
+		return array(
+			'key'        => $key,
+			'label'      => $label,
+			'updated_at' => gmdate( 'c' ),
+		);
+	}
+
+	/**
+	 * Current MCP session connection info (for get_site_context / agents).
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function current_connection_info() {
+		$auth = McpAuth::current_auth();
+		$user = wp_get_current_user();
+		if ( ! $user || ! $user->ID ) {
+			return array(
+				'labeled' => false,
+				'hint'    => 'Authenticate first, then call set_connection_label.',
+			);
+		}
+		$client_id   = isset( $auth['client_id'] ) ? (string) $auth['client_id'] : '';
+		$client_name = '';
+		if ( $client_id && class_exists( __NAMESPACE__ . '\\McpTokenStore' ) ) {
+			$client = McpTokenStore::get_client( $client_id );
+			$client_name = $client && ! empty( $client['client_name'] ) ? (string) $client['client_name'] : $client_id;
+		} elseif ( isset( $auth['method'] ) && 'application_password' === $auth['method'] ) {
+			$client_name = 'Application Password';
+			$client_id   = 'app';
+		}
+		$label = self::get_connection_label( (int) $user->ID, $client_id );
+		return array(
+			'user_login'   => $user->user_login,
+			'client_id'    => $client_id,
+			'client_name'  => $client_name,
+			'label'        => $label,
+			'labeled'      => ( '' !== $label ),
+			'method'       => isset( $auth['method'] ) ? $auth['method'] : '',
+			'scope'        => isset( $auth['scope'] ) ? $auth['scope'] : '',
+			'hint'         => '' === $label
+				? 'This connection has no label. Call set_connection_label with a clear device name like "Cursor on MacBook" or "Claude Desktop" so admins can tell grants apart.'
+				: 'Connection label is set. Update with set_connection_label if the device/client changes.',
+		);
 	}
 
 	/**

@@ -1,7 +1,7 @@
 {
     "name": "motiontactic/mt-mcp",
     "description": "MT MCP WordPress plugin",
-    "license": "proprietary",
+    "license": "GPL-2.0-or-later",
     "require": {
         "php": ">=7.4",
         "enshrined/svg-sanitize": "^1.1.1"

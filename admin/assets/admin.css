@@ -395,21 +395,126 @@
 	color: #614200;
 }
 
+.mt-mcp-copy-row {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+	gap: 8px;
+	margin: 12px 0 4px;
+}
+
+.mt-mcp-copy-row .mt-mcp-code-inline {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin: 0;
+	height: 30px;
+	line-height: 1.2;
+	padding: 4px 10px;
+	font-size: 12px;
+}
+
+.mt-mcp-copy-row .mt-mcp-copy {
+	flex: 0 0 auto;
+	height: 30px;
+	line-height: 28px;
+	padding: 0 10px;
+	font-size: 12px;
+	min-height: 0;
+}
+
 .mt-mcp-code-wrap {
 	position: relative;
 	margin: 12px 0 10px;
 }
 
-.mt-mcp-code-wrap .mt-mcp-copy {
+.mt-mcp-code-wrap--block .mt-mcp-copy {
 	position: absolute;
 	top: 10px;
 	right: 10px;
+	z-index: 1;
 }
 
 .mt-mcp-wrap textarea.mt-mcp-code-lg {
-	min-height: 168px;
+	min-height: 158px;
 	font-size: 13px;
-	padding-right: 72px;
+	padding-right: 96px;
+	display: block;
+}
+
+.mt-mcp-table-scroll {
+	overflow-x: auto;
+	margin: 0 -4px;
+	padding: 0 4px;
+	-webkit-overflow-scrolling: touch;
+}
+
+.mt-mcp-grants-table {
+	table-layout: auto;
+	min-width: 640px;
+}
+
+.mt-mcp-grants-table th,
+.mt-mcp-grants-table td {
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.mt-mcp-grant-label-cell {
+	position: relative;
+	width: 200px;
+	min-width: 160px;
+	white-space: normal !important;
+	vertical-align: middle !important;
+}
+
+.mt-mcp-grant-label-cell .mt-mcp-grant-label {
+	display: block;
+	width: 100%;
+	max-width: 200px;
+	margin: 0;
+	padding: 4px 8px;
+	font-size: 13px;
+	line-height: 1.3;
+	height: 30px;
+	box-sizing: border-box;
+}
+
+.mt-mcp-grant-label-status {
+	position: absolute;
+	left: 10px;
+	top: calc(100% - 6px);
+	font-size: 11px;
+	color: #00a32a;
+	font-weight: 600;
+	line-height: 1;
+	pointer-events: none;
+}
+
+.mt-mcp-grant-label-status:empty {
+	display: none;
+}
+
+.mt-mcp-grant-label-status.is-error {
+	color: #d63638;
+}
+
+.mt-mcp-grant-client {
+	font-weight: 600;
+}
+
+.mt-mcp-scope {
+	font-size: 11px !important;
+	white-space: normal !important;
+	word-break: break-word;
+}
+
+.mt-mcp-grant-actions {
+	text-align: right;
+}
+
+.mt-mcp-muted-code {
+	font-size: 11px !important;
+	opacity: 0.7;
 }
 
 .mt-mcp-details {

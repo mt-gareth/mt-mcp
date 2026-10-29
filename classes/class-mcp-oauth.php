@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Built-in OAuth 2.1 Authorization Server for MT MCP.
  *
@@ -369,6 +374,11 @@ class McpOAuth {
 				$scopes[] = McpAuth::SCOPE_WRITE;
 			}
 
+			$conn_label = isset( $params['connection_label'] ) ? sanitize_text_field( wp_unslash( $params['connection_label'] ) ) : '';
+			if ( $conn_label ) {
+				McpSupport::set_connection_label( (int) $user->ID, $client_id, $conn_label );
+			}
+
 			$code = bin2hex( random_bytes( 24 ) );
 			McpTokenStore::store_code(
 				hash( 'sha256', $code ),
@@ -408,8 +418,8 @@ class McpOAuth {
 
 	private function render_consent_screen( $user, $client, $params ) {
 		$site      = get_bloginfo( 'name' );
-		$name      = esc_html( $client['client_name'] );
-		$login     = esc_html( $user->user_login );
+		$name      = (string) $client['client_name'];
+		$login     = (string) $user->user_login;
 		$can_write = user_can( $user, 'edit_posts' ) || user_can( $user, 'manage_options' );
 		$wants_write = false !== strpos( (string) $params['scope'], McpAuth::SCOPE_WRITE );
 
@@ -450,9 +460,9 @@ class McpOAuth {
 <body>
 	<div class="card">
 		<div class="brand">MT MCP · <?php echo esc_html( $site ); ?></div>
-		<h1>Allow <em><?php echo $name; ?></em> to access this site?</h1>
+		<h1>Allow <em><?php echo esc_html( $name ); ?></em> to access this site?</h1>
 		<p>The agent will act as <strong>your</strong> WordPress user. Choose read-only or write access. Revoke anytime from Settings → MT MCP.</p>
-		<div class="who">Signed in as <strong><?php echo $login; ?></strong><?php echo $user->display_name ? ' · ' . esc_html( $user->display_name ) : ''; ?></div>
+		<div class="who">Signed in as <strong><?php echo esc_html( $login ); ?></strong><?php echo $user->display_name ? ' · ' . esc_html( $user->display_name ) : ''; ?></div>
 		<form method="post" action="<?php echo esc_url( $this->authorize_public_url() ); ?>">
 			<?php wp_nonce_field( 'mt_mcp_oauth_consent' ); ?>
 			<?php foreach ( $params as $k => $v ) : ?>
@@ -470,6 +480,11 @@ class McpOAuth {
 					<span><?php echo $can_write ? 'Create and update content when site-wide writes are enabled. Still respects your role capabilities.' : 'This account cannot write.'; ?></span>
 				</label>
 			</div>
+			<label style="display:block;margin:0 0 14px;font-size:13px;">
+				<span style="display:block;margin-bottom:6px;color:var(--muted);">Label this connection (optional)</span>
+				<input type="text" name="connection_label" maxlength="120" placeholder="e.g. Cursor on MacBook"
+					style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#121820;color:var(--text);" />
+			</label>
 			<p style="font-size:12px;margin-top:-8px;">Resource: <code><?php echo esc_html( $params['resource'] ); ?></code></p>
 			<div class="actions">
 				<button type="submit" name="deny" value="1" class="deny">Deny</button>
@@ -602,7 +617,19 @@ class McpOAuth {
 		);
 		McpTokenStore::delete_token( $hash );
 
-		$scope = isset( $params['scope'] ) && $params['scope'] ? $params['scope'] : $row['scope'];
+		// Never escalate scopes on refresh. Client may only request a subset of the grant.
+		$granted  = preg_split( '/\s+/', trim( (string) $row['scope'] ) );
+		$granted  = is_array( $granted ) ? array_filter( $granted ) : array();
+		$scope_in = (string) $row['scope'];
+		if ( ! empty( $params['scope'] ) ) {
+			$requested = preg_split( '/\s+/', trim( (string) $params['scope'] ) );
+			$kept      = array_values( array_intersect( (array) $requested, $granted ) );
+			if ( $kept ) {
+				$scope_in = implode( ' ', $kept );
+			}
+		}
+		$user  = get_userdata( (int) $row['user_id'] );
+		$scope = implode( ' ', $this->normalize_scopes( $scope_in, $user, $granted ) );
 		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $scope, $resource ) );
 	}
 
@@ -673,6 +700,7 @@ class McpOAuth {
 			'ok'          => true,
 			'scope'       => $scope,
 			'user_id'     => (int) $row['user_id'],
+			'client_id'   => isset( $row['client_id'] ) ? (string) $row['client_id'] : '',
 			'method'      => 'oauth',
 			'resource'    => $bound,
 			'audience_ok' => $audience_ok,
@@ -685,7 +713,7 @@ class McpOAuth {
 	public static function static_resources_match( $a, $b ) {
 		$na = untrailingslashit( strtolower( (string) $a ) );
 		$nb = untrailingslashit( strtolower( (string) $b ) );
-		return $na === $nb || false !== strpos( $na, $nb ) || false !== strpos( $nb, $na );
+		return $na === $nb;
 	}
 
 	private function handle_revoke() {
@@ -876,10 +904,22 @@ class McpOAuth {
 		return $secret && wp_check_password( $secret, $client['client_secret'] );
 	}
 
-	private function normalize_scopes( $scope_string, $user ) {
+	/**
+	 * @param string        $scope_string Requested scopes.
+	 * @param \WP_User|false $user User.
+	 * @param string[]|null $ceiling Optional max scopes (e.g. original grant on refresh).
+	 * @return string[]
+	 */
+	private function normalize_scopes( $scope_string, $user, $ceiling = null ) {
 		$requested = preg_split( '/\s+/', trim( (string) $scope_string ) );
+		$requested = is_array( $requested ) ? $requested : array();
 		$out       = array( McpAuth::SCOPE_READ );
-		if ( in_array( McpAuth::SCOPE_WRITE, $requested, true ) && ( user_can( $user, 'edit_posts' ) || user_can( $user, 'manage_options' ) ) ) {
+		$can_write = $user && ( user_can( $user, 'edit_posts' ) || user_can( $user, 'manage_options' ) );
+		$write_ok  = in_array( McpAuth::SCOPE_WRITE, $requested, true ) && $can_write;
+		if ( $write_ok && is_array( $ceiling ) ) {
+			$write_ok = in_array( McpAuth::SCOPE_WRITE, $ceiling, true );
+		}
+		if ( $write_ok ) {
 			$out[] = McpAuth::SCOPE_WRITE;
 		}
 		return array_values( array_unique( $out ) );
@@ -887,32 +927,58 @@ class McpOAuth {
 
 	private function is_allowed_redirect( $uri ) {
 		$parts = wp_parse_url( $uri );
-		if ( empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+		if ( empty( $parts['scheme'] ) ) {
 			return false;
 		}
 		$scheme = strtolower( $parts['scheme'] );
-		$host   = strtolower( $parts['host'] );
+		$host   = isset( $parts['host'] ) ? strtolower( $parts['host'] ) : '';
+
+		// Native app custom schemes (Cursor / VS Code / Claude Desktop).
+		$app_schemes = array( 'cursor', 'vscode', 'vscode-insiders', 'claude' );
+		if ( in_array( $scheme, $app_schemes, true ) ) {
+			return true;
+		}
+
+		if ( empty( $host ) ) {
+			return false;
+		}
+
+		// Loopback HTTP(S) for local MCP clients.
+		if ( in_array( $host, array( 'localhost', '127.0.0.1', '[::1]' ), true ) && in_array( $scheme, array( 'http', 'https' ), true ) ) {
+			return true;
+		}
+
+		$allowed_hosts = array_merge(
+			array(
+				'claude.ai',
+				'www.claude.ai',
+				'api.anthropic.com',
+				'chatgpt.com',
+				'chat.openai.com',
+			),
+			McpSupport::dcr_extra_hosts()
+		);
+		$allowed_hosts = array_values( array_unique( array_filter( array_map( 'strtolower', $allowed_hosts ) ) ) );
+
 		if ( 'https' === $scheme ) {
+			foreach ( $allowed_hosts as $allowed ) {
+				if ( $host === $allowed || substr( $host, -1 * ( strlen( $allowed ) + 1 ) ) === '.' . $allowed ) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// Non-loopback http only when explicitly allowlisted (staging tunnels).
+		if ( 'http' === $scheme && in_array( $host, $allowed_hosts, true ) ) {
 			return true;
 		}
-		if ( 'http' === $scheme && in_array( $host, array( 'localhost', '127.0.0.1', '[::1]' ), true ) ) {
-			return true;
-		}
-		// Allowlisted extra hosts (Settings / mt_mcp_dcr_extra_hosts) for http staging tunnels etc.
-		if ( in_array( $host, McpSupport::dcr_extra_hosts(), true ) ) {
-			return true;
-		}
-		// Cursor / Claude Desktop custom schemes sometimes appear; allow non-http only if clearly app-like.
-		if ( ! in_array( $scheme, array( 'http', 'https' ), true ) && preg_match( '/^[a-z][a-z0-9+.-]*$/i', $scheme ) ) {
-			return true;
-		}
+
 		return false;
 	}
 
 	private function resources_match( $a, $b ) {
-		$na = untrailingslashit( strtolower( (string) $a ) );
-		$nb = untrailingslashit( strtolower( (string) $b ) );
-		return $na === $nb || false !== strpos( $na, $nb ) || false !== strpos( $nb, $na );
+		return self::static_resources_match( $a, $b );
 	}
 
 	private function json_body() {

@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Plugin / core update sessions: list → confirm → one-at-a-time update
  * with zip snapshots for rollback and smoke checks between steps.

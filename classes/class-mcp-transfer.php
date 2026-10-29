@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Cross-site content packages: export a post (+ referenced media) from one
  * mt-mcp site and import it on another with URL rewrite and attachment remap.

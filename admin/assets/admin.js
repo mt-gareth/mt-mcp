@@ -95,28 +95,110 @@
 
 	document.querySelectorAll('.mt-mcp-copy').forEach(function (btn) {
 		btn.addEventListener('click', function () {
-			var target = btn.getAttribute('data-copy-target') === 'prev'
-				? btn.previousElementSibling
-				: document.querySelector(btn.getAttribute('data-copy-target'));
+			var sel = btn.getAttribute('data-copy-target');
+			var target = null;
+			if (sel === 'prev') {
+				target = btn.previousElementSibling;
+			} else if (sel) {
+				target = document.querySelector(sel);
+			}
+			if (!target) {
+				var wrap = btn.closest('.mt-mcp-copy-row, .mt-mcp-code-wrap');
+				if (wrap) {
+					target = wrap.querySelector('input, textarea');
+				}
+			}
 			if (!target) return;
-			var text = target.value || target.textContent || '';
+			var text = ('value' in target ? target.value : target.textContent) || '';
 			function done() {
-				var original = btn.textContent;
-				btn.textContent = 'Copied';
+				var original = btn.getAttribute('data-label') || btn.textContent;
+				btn.setAttribute('data-label', original);
+				btn.textContent = (cfg.i18n && cfg.i18n.copied) || 'Copied';
+				btn.classList.add('is-copied');
 				setTimeout(function () {
 					btn.textContent = original;
+					btn.classList.remove('is-copied');
 				}, 1400);
 			}
-			if (navigator.clipboard && navigator.clipboard.writeText) {
-				navigator.clipboard.writeText(text).then(done).catch(function () {
+			function fallback() {
+				if (typeof target.select === 'function') {
+					target.focus();
 					target.select();
+				}
+				try {
 					document.execCommand('copy');
-					done();
-				});
-			} else {
-				target.select();
-				document.execCommand('copy');
+				} catch (e) { /* ignore */ }
 				done();
+			}
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				navigator.clipboard.writeText(text).then(done).catch(fallback);
+			} else {
+				fallback();
+			}
+		});
+	});
+
+	function saveGrantLabel(input) {
+		var row = input.closest('tr');
+		if (!row) return;
+		var next = (input.value || '').trim();
+		var prev = input.getAttribute('data-saved') || '';
+		if (next === prev) return;
+		var status = row.querySelector('.mt-mcp-grant-label-status');
+		var body = new FormData();
+		body.append('action', 'mt_mcp_save_grant_label');
+		body.append('nonce', cfg.labelNonce || '');
+		body.append('user_id', row.getAttribute('data-user-id') || '');
+		body.append('client_id', row.getAttribute('data-client-id') || '');
+		body.append('label', next);
+		input.disabled = true;
+		if (status) {
+			status.textContent = '';
+			status.classList.remove('is-error');
+		}
+		fetch(cfg.ajaxUrl || (window.ajaxurl || ''), {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: body
+		})
+			.then(function (res) {
+				return res.json().then(function (data) {
+					if (!res.ok || !data || !data.success) {
+						throw new Error((data && data.data && data.data.message) || 'Save failed.');
+					}
+					return data.data || {};
+				});
+			})
+			.then(function () {
+				input.setAttribute('data-saved', next);
+				if (status) {
+					status.textContent = (cfg.i18n && cfg.i18n.saved) || 'Saved';
+					setTimeout(function () {
+						if (status.textContent === ((cfg.i18n && cfg.i18n.saved) || 'Saved')) {
+							status.textContent = '';
+						}
+					}, 1600);
+				}
+			})
+			.catch(function (err) {
+				if (status) {
+					status.textContent = err.message || 'Save failed.';
+					status.classList.add('is-error');
+				}
+			})
+			.finally(function () {
+				input.disabled = false;
+			});
+	}
+
+	document.querySelectorAll('.mt-mcp-grant-label').forEach(function (input) {
+		input.addEventListener('blur', function () {
+			saveGrantLabel(input);
+		});
+		input.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				input.blur();
 			}
 		});
 	});

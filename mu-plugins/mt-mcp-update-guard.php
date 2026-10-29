@@ -2,8 +2,9 @@
 /**
  * Plugin Name: MT MCP Update Guard
  * Description: Dead-man's switch for MT MCP plugin updates. Auto-rolls back if confirm_update_ok is not received before the deadline. Loads as must-use so it still runs when a regular plugin fatals.
- * Version: 1.3.8
+ * Version: 1.3.14
  * Author: Motion Tactic
+ * License: GPL-2.0-or-later
  *
  * Also registers: wp mt-mcp-guard rollback|pending|confirm
  * Use with a broken site: wp --skip-plugins mt-mcp-guard rollback
@@ -13,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'MT_MCP_GUARD_VERSION', '1.3.8' );
+define( 'MT_MCP_GUARD_VERSION', '1.3.14' );
 
 /**
  * Guard data directory (not under uploads — always under wp-content).

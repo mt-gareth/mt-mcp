@@ -2,6 +2,11 @@
 
 namespace MT\Mcp;
 
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * MT MCP cookbook: copyable agent prompts for common Motion Tactic workflows.
  * Focused on ACF/classic themes, Yoast, menus, media, staging→prod — not Woo/builders.
@@ -44,7 +49,7 @@ class McpRecipes {
 				'minutes'    => 5,
 				'writes'     => false,
 				'tags'       => array( 'oauth', 'waf', 'doctor' ),
-				'prompt'     => "You are connected to this WordPress site via MT MCP.\n\n1. Call connection_doctor and summarize failed checks first.\n2. If .well-known is not HTTP 200 (or redirects), explain the WAF/host fix and stop.\n3. Confirm get_site_context environment, writes_enabled, pause_writes, force_draft, and site_brief.\n4. Paste the paste_for_support block if anything failed (secrets are already redacted).\n\nDo not write anything.",
+				'prompt'     => "You are connected to this WordPress site via MT MCP.\n\n1. Call connection_doctor and summarize failed checks first.\n2. If .well-known is not HTTP 200 (or redirects), explain the WAF/host fix and stop.\n3. Confirm get_site_context environment, writes_enabled, pause_writes, force_draft, high_risk_allowed, and site_brief.\n4. Note auth_header_probe / waf_signals if present.\n5. Paste the paste_for_support block if anything failed (secrets are already redacted).\n\nDo not write anything.",
 			),
 			array(
 				'id'         => 'onboard-skill',
@@ -187,7 +192,7 @@ class McpRecipes {
 				'minutes'    => 15,
 				'writes'     => true,
 				'tags'       => array( 'redirects', 'state_token' ),
-				'prompt'     => "Import redirects safely.\n\nCSV or items:\n[paste]\n\n1. plugin_capability_matrix / list_redirects — confirm Redirection or Yoast Premium backend.\n2. import_redirects dry_run / preview — expect a state_token.\n3. Show me the planned from→to list and counts.\n4. Only after I approve, confirm_dangerous_op or re-call with state_token/apply.\n\nDo not wipe existing redirects.",
+				'prompt'     => "Import redirects safely.\n\nCSV or items:\n[paste]\n\n1. plugin_capability_matrix / list_redirects — confirm Redirection or Yoast Premium backend.\n2. Confirm high_risk_allowed (Settings → Allow high-risk destructive ops, or set_write_gates). Import apply is locked when high-risk is off.\n3. import_redirects dry_run / preview — expect a state_token.\n4. Show me the planned from→to list and counts.\n5. Only after I approve, confirm_dangerous_op or re-call with state_token/apply.\n\nDo not wipe existing redirects.",
 			),
 			array(
 				'id'         => 'launch-prep',
@@ -289,6 +294,151 @@ class McpRecipes {
 				'prompt'     => "Call list_theme_templates (and describe_post_type for page if useful).\n\nReturn theme name, stylesheet, and template file → label map. Read only.",
 			),
 
+
+			array(
+				'id'         => 'client-rollout',
+				'title'      => 'Client rollout checklist',
+				'summary'    => 'First-install gates: doctor green, Site Brief, AGENTS.md stub, high-risk off, updates off on prod, Cursor skill. Operational setup.',
+				'category'   => 'setup',
+				'difficulty' => 'beginner',
+				'minutes'    => 15,
+				'writes'     => true,
+				'tags'       => array( 'rollout', 'gates', 'agents_md', 'doctor', 'setup' ),
+				'prompt'     => "Prepare this WordPress site for MT MCP client rollout.\n\n1. connection_doctor — all critical checks green (HTTPS, .well-known or alternates, MCP endpoint, auth_header_probe). Fix failures before continuing; paste_for_support if stuck.\n2. get_site_context — note environment. If production: confirm Allow MCP writes is intentional; Allow MCP plugin/core updates must stay OFF unless this is a staging drill; high_risk_allowed must be OFF.\n3. Propose a Site Brief (≤2000 chars) covering: never publish without approval, force_draft preference, sensitive pages (legal/careers), who to ping. After I approve, set_write_gates site_brief:\"…\".\n4. Propose a short AGENTS.md stub (brand voice, main CPTs, ACF flexible layouts, SEO plugin). After I approve, update_site_docs — only if docs_write_allowed; otherwise print markdown for me to paste in Settings → AGENTS.md. Optionally seed CHANGELOG.md with today's rollout note.\n5. Confirm force_draft on for production client sites (set_write_gates if needed).\n6. generate_cursor_skill — return skill markdown for the client repo.\n7. Summarize a one-page rollout card: environment, gates (writes/pause/force_draft/high_risk/updates), discovery URLs, MCP URL for Cursor, doctor status.\n\nDo not enable high_risk or updates on production. Do not mutate content pages.",
+			),
+			array(
+				'id'         => 'seed-site-docs',
+				'title'      => 'Seed AGENTS.md + CHANGELOG',
+				'summary'    => 'Draft site context docs from get_site_context + ACF inventory; write only if docs_write_allowed.',
+				'category'   => 'setup',
+				'difficulty' => 'beginner',
+				'minutes'    => 10,
+				'writes'     => true,
+				'tags'       => array( 'agents_md', 'changelog', 'get_site_docs' ),
+				'prompt'     => "Seed site docs for chat agents.\n\n1. get_site_context + get_site_docs.\n2. inventory_post_types + list_acf_field_groups (summary only).\n3. Draft AGENTS.md: environment rules, CPTs, where flexible content lives, SEO/redirect plugins, \"prefer drafts\".\n4. Draft a CHANGELOG.md starter with today's date.\n5. Show both for approval. If docs_write_allowed, update_site_docs dry_run then apply; else give me paste-ready markdown for Settings.\n\nSite Brief wins on conflict with AGENTS.md.",
+			),
+			array(
+				'id'         => 'soft-404-pass',
+				'title'      => 'Sitemap soft-404 crawl',
+				'summary'    => 'GET-check published URLs (or sitemap) for soft-404 body signals beyond HEAD.',
+				'category'   => 'launch',
+				'difficulty' => 'beginner',
+				'minutes'    => 15,
+				'writes'     => false,
+				'tags'       => array( 'sitemap_diff', 'soft_404', 'qa' ),
+				'prompt'     => "Crawl for soft-404s.\n\n1. sitemap_diff with check_body:true, source:\"posts\" (or source:\"sitemap\"), limit 40.\n2. Group issues: http_4xx, redirect, soft_404 (include signal).\n3. Suggest redirects or content fixes; do not write until I approve.\n\nRead only.",
+			),
+			array(
+				'id'         => 'permalink-clash-audit',
+				'title'      => 'Permalink / CPT clash audit',
+				'summary'    => 'Deep CPT inventory plus duplicate slug report before IA or import work.',
+				'category'   => 'setup',
+				'difficulty' => 'beginner',
+				'minutes'    => 10,
+				'writes'     => false,
+				'tags'       => array( 'inventory_post_types', 'permalink_clash_report' ),
+				'prompt'     => "Audit post types and slug clashes.\n\n1. inventory_post_types.\n2. permalink_clash_report.\n3. Table of clashes with types/URLs and recommended unique slugs.\n\nRead only — do not rename until I approve.",
+			),
+			array(
+				'id'         => 'internal-links-pass',
+				'title'      => 'Suggest internal links',
+				'summary'    => 'For key URLs, suggest related published targets; draft inserts only after approval.',
+				'category'   => 'seo',
+				'difficulty' => 'intermediate',
+				'minutes'    => 20,
+				'writes'     => true,
+				'tags'       => array( 'suggest_internal_links', 'seo' ),
+				'prompt'     => "Internal linking pass for: [list of URLs or IDs]\n\n1. For each source, suggest_internal_links.\n2. Propose 1–3 contextual link insertions (anchor + target) without stuffing.\n3. Show old → new excerpts. dry_run update_post / find_replace first.\n4. Apply only after I approve, prefer drafts on production.\n\nRespect Site Brief.",
+			),
+			array(
+				'id'         => 'schedule-content',
+				'title'      => 'Schedule a draft to publish',
+				'summary'    => 'Preflight a draft, then schedule_post for a future time after approval.',
+				'category'   => 'content',
+				'difficulty' => 'beginner',
+				'minutes'    => 10,
+				'writes'     => true,
+				'tags'       => array( 'schedule_post', 'preflight_publish' ),
+				'prompt'     => "Schedule this draft: [ID or URL]\nPublish at: [local datetime + timezone]\n\n1. preflight_publish — list blockers.\n2. If blockers, stop and report.\n3. schedule_post dry_run if available, else show the planned datetime.\n4. After I approve, schedule_post. Do not publish immediately unless I said \"publish now\".",
+			),
+			array(
+				'id'         => 'options-page-edit',
+				'title'      => 'Edit ACF options page',
+				'summary'    => 'Read options schema/values, propose field updates with dry_run, then apply.',
+				'category'   => 'acf',
+				'difficulty' => 'intermediate',
+				'minutes'    => 15,
+				'writes'     => true,
+				'tags'       => array( 'update_options_page', 'acf' ),
+				'prompt'     => "Update ACF options page fields.\n\nPage: [option page slug or \"option\"]\nChanges wanted: [describe]\n\n1. list_acf_options_pages + get_acf_schema / get_options_page.\n2. Propose field → new value map.\n3. update_options_page dry_run:true — show diff/verification.\n4. Apply only after I approve.\n\nNever touch protected options (siteurl, active_plugins, keys).",
+			),
+			array(
+				'id'         => 'term-taxonomy-setup',
+				'title'      => 'Set up categories / terms',
+				'summary'    => 'Inventory taxonomies, create missing terms as dry_run first, then apply.',
+				'category'   => 'content',
+				'difficulty' => 'beginner',
+				'minutes'    => 15,
+				'writes'     => true,
+				'tags'       => array( 'create_term', 'taxonomies' ),
+				'prompt'     => "Set up taxonomy terms.\n\nTaxonomy: [category / custom]\nDesired tree:\n[paste]\n\n1. list_taxonomies + get_terms.\n2. Diff desired vs existing.\n3. create_term / update_term with dry_run first.\n4. Apply after approval. delete_term only if I explicitly ask (permanent).\n\nDo not reassign posts until terms exist.",
+			),
+			array(
+				'id'         => 'bulk-reassign-author',
+				'title'      => 'Bulk reassign author / status',
+				'summary'    => 'list_users + bulk_update_posts with dry_run for status/author/parent changes.',
+				'category'   => 'content',
+				'difficulty' => 'intermediate',
+				'minutes'    => 15,
+				'writes'     => true,
+				'tags'       => array( 'bulk_update_posts', 'list_users' ),
+				'prompt'     => "Bulk update posts.\n\nFilter: [post_type / status / ids]\nChange: [author and/or status and/or parent]\n\n1. list_users (safe fields only) if assigning author.\n2. list_posts / search_posts to confirm targets.\n3. bulk_update_posts dry_run:true — show count and sample.\n4. Apply after I approve. Prefer drafts over publish on production.",
+			),
+			array(
+				'id'         => 'replace-attachment-keep-id',
+				'title'      => 'Replace media file keep ID',
+				'summary'    => 'Swap attachment bytes while keeping the same ID so ACF image fields stay valid.',
+				'category'   => 'media',
+				'difficulty' => 'intermediate',
+				'minutes'    => 10,
+				'writes'     => true,
+				'tags'       => array( 'replace_attachment_file', 'media' ),
+				'prompt'     => "Replace an attachment file without changing its ID.\n\nAttachment ID or URL: […]\nNew file: [url or note that I will provide data]\n\n1. get_media — confirm current file/mime/alt.\n2. find_media_by_hash if we might already have the new bytes.\n3. replace_attachment_file dry_run if available, then apply. Keep alt unless I supply a new one.\n4. Confirm ACF fields still point at the same ID.\n\nDo not upload a duplicate unless force_new is required.",
+			),
+			array(
+				'id'         => 'flush-after-deploy',
+				'title'      => 'Flush caches after deploy',
+				'summary'    => 'Allowlisted flush_caches (object cache / rewrites / known page caches) with dry_run first.',
+				'category'   => 'maintenance',
+				'difficulty' => 'beginner',
+				'minutes'    => 5,
+				'writes'     => true,
+				'tags'       => array( 'flush_caches' ),
+				'prompt'     => "Flush caches after a deploy/content push.\n\n1. flush_caches dry_run:true with targets like [\"object_cache\",\"rewrites\"] plus any active page cache from plugin_capability_matrix / site context (wp_rocket, litespeed, w3tc, autoptimize, elementor).\n2. Show planned vs skipped.\n3. After I approve, flush_caches without dry_run.\n\nNo shell. Do not flush unknown plugins.",
+			),
+			array(
+				'id'         => 'draft-preview-share',
+				'title'      => 'Share a draft preview link',
+				'summary'    => 'create_draft_preview for stakeholder review without publishing.',
+				'category'   => 'content',
+				'difficulty' => 'beginner',
+				'minutes'    => 3,
+				'writes'     => true,
+				'tags'       => array( 'create_draft_preview' ),
+				'prompt'     => "Create a shareable preview for draft [ID or URL].\n\n1. get_post confirm status=draft (or pending).\n2. create_draft_preview — return the preview URL and expiry.\n3. Do not publish. Offer revoke_draft_preview if I need to kill the link later.",
+			),
+			array(
+				'id'         => 'usage-to-recipes',
+				'title'      => 'Usage insights → recipe ideas',
+				'summary'    => 'Aggregate audit log tool usage and map to cookbook recipes / gaps.',
+				'category'   => 'maintenance',
+				'difficulty' => 'beginner',
+				'minutes'    => 5,
+				'writes'     => false,
+				'tags'       => array( 'get_usage_insights', 'audit', 'recipes' ),
+				'prompt'     => "Analyze how this site uses MT MCP.\n\n1. get_usage_insights (limit recent audit entries).\n2. Summarize top tools, error rate, and matched recipes.\n3. List gaps: frequent tools with weak/no recipe coverage — suggest new recipe titles.\n\nRead only. Do not export PII; audit is identifier-only.",
+			),
+
 			array(
 				'id'         => 'plugin-core-updates',
 				'title'      => 'Plugin & core update session',
@@ -336,12 +486,48 @@ class McpRecipes {
 	}
 
 	/**
+	 * Suggest recipes whose tags/tools overlap with used tool names.
+	 *
+	 * @param string[] $tools Tool names from audit.
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function suggest_for_tools( $tools ) {
+		$tools = array_values( array_unique( array_filter( array_map( 'strval', (array) $tools ) ) ) );
+		$out   = array();
+		foreach ( self::all() as $recipe ) {
+			$tags = isset( $recipe['tags'] ) ? (array) $recipe['tags'] : array();
+			$hay  = strtolower( implode( ' ', $tags ) . ' ' . ( isset( $recipe['id'] ) ? $recipe['id'] : '' ) . ' ' . ( isset( $recipe['title'] ) ? $recipe['title'] : '' ) );
+			$hits = array();
+			foreach ( $tools as $tool ) {
+				$t = strtolower( (string) $tool );
+				if ( ! $t ) {
+					continue;
+				}
+				if ( in_array( $t, $tags, true ) || false !== strpos( $hay, $t ) ) {
+					$hits[] = $tool;
+				}
+			}
+			if ( $hits ) {
+				$out[] = array(
+					'id'            => $recipe['id'],
+					'title'         => $recipe['title'],
+					'category'      => isset( $recipe['category'] ) ? $recipe['category'] : '',
+					'matched_tools' => array_values( array_unique( $hits ) ),
+					'summary'       => isset( $recipe['summary'] ) ? $recipe['summary'] : '',
+				);
+			}
+		}
+		return $out;
+	}
+
+	/**
 	 * MCP prompts/list shaped entries derived from recipes that map cleanly.
 	 *
 	 * @return array<int,array<string,mixed>>
 	 */
 	public static function as_mcp_prompt_list() {
 		$order = array(
+			'client-rollout'    => 'client_rollout',
 			'session-plan'      => 'session_plan',
 			'seo-pass'          => 'seo_pass',
 			'content-inventory' => 'content_inventory',
@@ -358,14 +544,17 @@ class McpRecipes {
 				continue;
 			}
 			$recipe = $by_id[ $recipe_id ];
+			if ( 'session-plan' === $recipe_id ) {
+				$args = array( array( 'name' => 'goal', 'description' => 'What the user wants done', 'required' => true ) );
+			} elseif ( in_array( $recipe_id, array( 'launch-prep', 'client-rollout' ), true ) ) {
+				$args = array();
+			} else {
+				$args = array( array( 'name' => 'post_type', 'description' => 'Post type (default page)', 'required' => ( 'acf-gap-check' === $recipe_id ) ) );
+			}
 			$out[]  = array(
 				'name'        => $prompt_name,
 				'description' => $recipe['summary'],
-				'arguments'   => ( 'session-plan' === $recipe_id )
-					? array( array( 'name' => 'goal', 'description' => 'What the user wants done', 'required' => true ) )
-					: ( 'launch-prep' === $recipe_id
-						? array()
-						: array( array( 'name' => 'post_type', 'description' => 'Post type (default page)', 'required' => ( 'acf-gap-check' === $recipe_id ) ) ) ),
+				'arguments'   => $args,
 			);
 		}
 		return $out;
