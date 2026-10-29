@@ -17,6 +17,7 @@ class McpSupport {
 	const OPTION_WEBHOOK_URL  = 'mt_mcp_webhook_url';
 	const OPTION_PAUSE_WRITES = 'mt_mcp_pause_writes';
 	const OPTION_FORCE_DRAFT  = 'mt_mcp_force_draft';
+	const OPTION_ALLOW_HIGH_RISK = 'mt_mcp_allow_high_risk';
 	const OPTION_SITE_BRIEF   = 'mt_mcp_site_brief';
 	const OPTION_META_ALLOWLIST = 'mt_mcp_meta_allowlist';
 	const OPTION_AGENTS_MD    = 'mt_mcp_agents_md';
@@ -810,6 +811,29 @@ class McpSupport {
 	public static function force_draft_enabled() {
 		return (bool) get_option( self::OPTION_FORCE_DRAFT );
 	}
+
+	/**
+	 * Permanent delete / redirect wipe require this second lock (off by default).
+	 */
+	public static function high_risk_allowed() {
+		return (bool) get_option( self::OPTION_ALLOW_HIGH_RISK );
+	}
+
+	/**
+	 * @param string $op Short label for error message.
+	 * @throws \Exception When high-risk ops are locked.
+	 */
+	public static function assert_high_risk_allowed( $op = 'this operation' ) {
+		if ( self::high_risk_allowed() ) {
+			return;
+		}
+		throw new \Exception(
+			'High-risk destructive ops are locked. Enable "Allow high-risk destructive ops" in Settings → MT MCP before '
+			. $op
+			. ' (permanent delete, redirect delete/import apply). Soft trash still works.'
+		);
+	}
+
 
 	public static function site_brief() {
 		$brief = (string) get_option( self::OPTION_SITE_BRIEF, '' );

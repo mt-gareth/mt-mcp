@@ -92,6 +92,11 @@ class Admin {
 				update_option( McpSupport::OPTION_FORCE_DRAFT, $val ? '1' : '' );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
+			case 'allow_high_risk':
+				$val = ! empty( $raw ) && '0' !== (string) $raw && 'false' !== (string) $raw;
+				update_option( McpSupport::OPTION_ALLOW_HIGH_RISK, $val ? '1' : '' );
+				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
+
 			case 'allow_updates':
 				$val = ! empty( $raw ) && '0' !== (string) $raw && 'false' !== (string) $raw;
 				update_option( McpUpdates::OPTION_ALLOW_UPDATES, $val ? '1' : '' );
@@ -576,6 +581,16 @@ class Admin {
 					<span>Force draft on create</span>
 				</label>
 				<p class="mt-mcp-help">New posts are forced to draft and marked <code>_mt_mcp_needs_review</code> for human Preview/Publish.</p>
+
+				<label class="mt-mcp-toggle">
+					<input type="checkbox"
+						   class="mt-mcp-autosave"
+						   data-key="allow_high_risk"
+						   value="1"
+						   <?php checked( get_option( McpSupport::OPTION_ALLOW_HIGH_RISK ) ); ?> />
+					<span>Allow high-risk destructive ops</span>
+				</label>
+				<p class="mt-mcp-help">Off by default. Required for permanent post delete (<code>force_delete</code>), <code>delete_redirect</code>, and applying <code>import_redirects</code>. Soft trash still works when this is off. Also toggleable via <code>set_write_gates</code> (<code>allow_high_risk</code>).</p>
 
 				<label class="mt-mcp-toggle">
 					<input type="checkbox"

@@ -87,6 +87,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] Meta-key allowlist; alternate OAuth discovery paths; AGENTS.md / CHANGELOG.md site docs
 
+### Shipped in 1.3.12
+
+- [x] High-risk second lock; `menu://` + `media://missing-alt` resources; Doctor auth/WAF probe
+
 ---
 
 ## Capability map (what works today)
@@ -224,17 +228,17 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **Write-and-confirm outcome enum** on all mutations
 - [x] **Site Context AGENTS.md + CHANGELOG.md** — Settings + `get_site_docs` / `site://agents` / `site://changelog`
 - [x] **Prompts / resources** — Recipes tab + MCP `seo_pass` / `launch_prep` / `acf_gap_check` / `content_inventory` / `session_plan`
-- [ ] **Richer MCP resources** — `acf://`, `menu://`, `media://missing-alt`
+- [x] **Richer MCP resources** — `acf://schema/{type}`, `menu://{location}`, `media://missing-alt`
 
 ### Ops & hosting
 
 - [x] **`MT_MCP_PUBLIC_BASE`** for tunnel/local OAuth advertise URL
 - [x] **Alternate discovery URL** — `/mt-mcp/oauth/*` + REST `mt-mcp/v1/oauth/*` (doctor probes both)
-- [ ] **Output / Auth-header / Sucuri diagnostics** folded into Doctor
+- [x] **Output / Auth-header / Sucuri diagnostics** — `connection_doctor` auth_header_probe + waf_signals
 - [x] **Plugin / core update sessions** — list → confirm → one-at-a-time + zip rollback + smoke checks (Allow MCP updates)
 - [x] **Allowlisted cache flush** — `flush_caches` (object_cache / rewrites / Rocket / LiteSpeed / W3TC / Autoptimize / Elementor)
 - [x] **Meta-key allowlist** — Settings + gates `meta` bucket / find_replace meta (empty = refuse)
-- [ ] **High-risk second lock** — permanent delete / redirect wipe need extra toggle
+- [x] **High-risk second lock** — Settings / `set_write_gates.allow_high_risk` gates force_delete, delete_redirect, import_redirects apply
 - [ ] **Alert emails without payload** on denials/errors
 - [ ] **Tool profiles or discover/run gateway** if `tools/list` gets heavy
 - [ ] **Long-running task/poll** for sitemap_diff / bulk SEO / alt sweeps

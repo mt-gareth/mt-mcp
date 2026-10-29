@@ -80,6 +80,7 @@ class McpToolHandlers {
 				'has_agents_md'  => (bool) McpSupport::agents_md(),
 				'has_changelog_md'=> (bool) McpSupport::changelog_md(),
 				'docs_write_allowed' => McpSupport::docs_write_allowed(),
+				'high_risk_allowed' => McpSupport::high_risk_allowed(),
 			),
 		);
 	}
@@ -627,6 +628,9 @@ class McpToolHandlers {
 		}
 		if ( $force && ! empty( $args['state_token'] ) ) {
 			McpPublic::consume_state_token( $args['state_token'], 'force_delete_post' );
+		}
+		if ( $force ) {
+			McpSupport::assert_high_risk_allowed( 'force_delete_post' );
 		}
 		$result = $force ? wp_delete_post( $post_id, true ) : wp_trash_post( $post_id );
 		if ( ! $result ) {
@@ -2357,6 +2361,9 @@ class McpToolHandlers {
 	}
 
 	public function delete_redirect( $args ) {
+		if ( empty( $args['dry_run'] ) ) {
+			McpSupport::assert_high_risk_allowed( 'delete_redirect' );
+		}
 		$backend = McpSupport::redirects_backend();
 		if ( 'yoast' === $backend ) {
 			$from = isset( $args['from'] ) ? $args['from'] : '';
@@ -3679,6 +3686,8 @@ MD;
 			throw new \Exception( 'Pass apply:true with state_token from the dry_run preview, or dry_run first.' );
 		}
 
+		McpSupport::assert_high_risk_allowed( 'import_redirects' );
+
 		$results = array();
 		foreach ( $planned as $row ) {
 			try {
@@ -3943,14 +3952,23 @@ MD;
 			update_option( McpSupport::OPTION_SITE_BRIEF, $brief, false );
 			$changed['site_brief'] = $brief;
 		}
+		if ( array_key_exists( 'allow_high_risk', $args ) ) {
+			if ( ! current_user_can( 'manage_options' ) ) {
+				throw new \Exception( 'manage_options required to change allow_high_risk.' );
+			}
+			$val = ! empty( $args['allow_high_risk'] );
+			update_option( McpSupport::OPTION_ALLOW_HIGH_RISK, $val ? '1' : '' );
+			$changed['allow_high_risk'] = $val;
+		}
 		if ( empty( $changed ) ) {
-			throw new \Exception( 'Provide pause_writes and/or force_draft and/or site_brief.' );
+			throw new \Exception( 'Provide pause_writes and/or force_draft and/or site_brief and/or allow_high_risk.' );
 		}
 		return array(
-			'updated'      => $changed,
-			'pause_writes' => McpSupport::writes_paused(),
-			'force_draft'  => McpSupport::force_draft_enabled(),
-			'site_brief'   => McpSupport::site_brief(),
+			'updated'          => $changed,
+			'pause_writes'     => McpSupport::writes_paused(),
+			'force_draft'      => McpSupport::force_draft_enabled(),
+			'allow_high_risk'  => McpSupport::high_risk_allowed(),
+			'site_brief'       => McpSupport::site_brief(),
 		);
 	}
 
@@ -3959,6 +3977,9 @@ MD;
 		$op    = isset( $args['operation'] ) ? sanitize_key( $args['operation'] ) : '';
 		if ( ! $token || ! $op ) {
 			throw new \Exception( 'Provide operation and state_token from a dry_run preview.' );
+		}
+		if ( in_array( $op, array( 'force_delete_post', 'import_redirects' ), true ) ) {
+			McpSupport::assert_high_risk_allowed( $op );
 		}
 		$payload = McpPublic::consume_state_token( $token, $op );
 		if ( 'force_delete_post' === $op ) {
@@ -4042,7 +4063,87 @@ MD;
 			);
 		}
 
-		$auth_header_note = 'If a WAF strips Authorization, OAuth/App Passwords fail. Check Host/WPE/Sucuri logs for python-httpx UA blocks.';
+		// Auth-header strip probe: send a fake Bearer and see if the challenge still expects auth.
+		$auth_probe = wp_remote_request(
+			$mcp,
+			array(
+				'method'      => 'POST',
+				'timeout'     => 8,
+				'redirection' => 0,
+				'sslverify'   => $ssl,
+				'headers'     => array(
+					'Content-Type'  => 'application/json',
+					'Accept'        => 'application/json',
+					'Authorization' => 'Bearer mt-mcp-doctor-probe-token',
+					'User-Agent'    => 'python-httpx/0.27 MT-MCP-Doctor',
+				),
+				'body'        => wp_json_encode(
+					array(
+						'jsonrpc' => '2.0',
+						'id'      => 1,
+						'method'  => 'initialize',
+						'params'  => array(
+							'protocolVersion' => '2024-11-05',
+							'capabilities'    => new \stdClass(),
+							'clientInfo'      => array( 'name' => 'mt-mcp-doctor', 'version' => '1' ),
+						),
+					)
+				),
+			)
+		);
+		if ( is_wp_error( $auth_probe ) ) {
+			$checks[] = array( 'key' => 'auth_header_probe', 'ok' => false, 'detail' => $auth_probe->get_error_message() );
+		} else {
+			$acode = (int) wp_remote_retrieve_response_code( $auth_probe );
+			$abody = (string) wp_remote_retrieve_body( $auth_probe );
+			$act   = (string) wp_remote_retrieve_header( $auth_probe, 'content-type' );
+			$awww  = (string) wp_remote_retrieve_header( $auth_probe, 'www-authenticate' );
+			$is_html = ( false !== stripos( $act, 'text/html' ) ) || (bool) preg_match( '/<\s*(html|!doctype)/i', substr( $abody, 0, 500 ) );
+			$json_ok = (bool) ( json_decode( $abody, true ) || ( $abody && '{' === substr( ltrim( $abody ), 0, 1 ) ) );
+			$waf_sig = array();
+			$ahdrs = wp_remote_retrieve_headers( $auth_probe );
+			$ahdr_str = is_object( $ahdrs ) && method_exists( $ahdrs, 'getAll' )
+				? wp_json_encode( $ahdrs->getAll() )
+				: (string) wp_json_encode( $ahdrs );
+			$hay = $abody . ' ' . $act . ' ' . $ahdr_str;
+			if ( preg_match( '/sucuri|cloudproxy/i', $hay ) ) {
+				$waf_sig[] = 'sucuri';
+			}
+			if ( preg_match( '/cloudflare|cf-ray|challenge-platform/i', $hay ) ) {
+				$waf_sig[] = 'cloudflare';
+			}
+			if ( preg_match( '/attention required|access denied|captcha/i', $abody ) ) {
+				$waf_sig[] = 'challenge_page';
+			}
+			// Healthy: 401 with WWW-Authenticate (token rejected but header reached WP).
+			// Suspicious: 200 HTML challenge, or 403 HTML, or 401 without www-authenticate after Bearer sent (header stripped → anonymous).
+			$header_reached = ( 401 === $acode && $awww ) || ( 401 === $acode && $json_ok && ! $is_html );
+			$stripped_suspect = ( 401 === $acode && ! $awww && ! $is_html ) || ( in_array( $acode, array( 200, 403 ), true ) && $is_html );
+			$ok_auth = $header_reached && ! $is_html && empty( $waf_sig );
+			$detail = 'POST+Bearer HTTP ' . $acode;
+			if ( $is_html ) {
+				$detail .= '; body looks like HTML (WAF/login page?), not MCP JSON';
+			}
+			if ( $stripped_suspect && ! $header_reached ) {
+				$detail .= '; Authorization may be stripped before WordPress (no WWW-Authenticate on 401, or challenge HTML)';
+			}
+			if ( $waf_sig ) {
+				$detail .= '; waf_signals=' . implode( ',', array_unique( $waf_sig ) );
+			}
+			$checks[] = array(
+				'key'              => 'auth_header_probe',
+				'ok'               => $ok_auth,
+				'detail'           => $detail,
+				'content_type'     => $act,
+				'www_authenticate' => $awww ? '[present]' : '',
+				'body_is_html'     => $is_html,
+				'body_looks_json'  => $json_ok,
+				'waf_signals'      => array_values( array_unique( $waf_sig ) ),
+				'body_snippet'     => McpSupport::redact_secrets( substr( wp_strip_all_tags( $abody ), 0, 180 ) ),
+			);
+		}
+
+		$auth_header_note = 'If a WAF strips Authorization, OAuth/App Passwords fail. Allow Authorization on /mt-mcp and /.well-known/*. Check Host/WPE/Sucuri for python-httpx UA blocks.';
 		$checks[] = array(
 			'key'    => 'waf_hints',
 			'ok'     => true,
@@ -4055,11 +4156,20 @@ MD;
 			'key'    => 'writes',
 			'ok'     => (bool) get_option( McpSupport::OPTION_ALLOW_WRITES ) && ! McpSupport::writes_paused(),
 			'detail' => sprintf(
-				'allow_writes=%s pause_writes=%s force_draft=%s',
+				'allow_writes=%s pause_writes=%s force_draft=%s high_risk=%s',
 				get_option( McpSupport::OPTION_ALLOW_WRITES ) ? 'yes' : 'no',
 				McpSupport::writes_paused() ? 'yes' : 'no',
-				McpSupport::force_draft_enabled() ? 'yes' : 'no'
+				McpSupport::force_draft_enabled() ? 'yes' : 'no',
+				McpSupport::high_risk_allowed() ? 'yes' : 'no'
 			),
+		);
+		$checks[] = array(
+			'key'    => 'high_risk_lock',
+			'ok'     => true,
+			'detail' => McpSupport::high_risk_allowed()
+				? 'High-risk destructive ops ENABLED (force_delete, delete_redirect, import_redirects apply)'
+				: 'High-risk destructive ops LOCKED (default). Soft trash still works.',
+			'allowed'=> McpSupport::high_risk_allowed(),
 		);
 		$checks[] = array(
 			'key'    => 'three_gates',
@@ -4092,6 +4202,24 @@ MD;
 						'site_url' => $base,
 						'env' => McpSupport::get_environment(),
 						'version' => defined( 'MT_MCP_VERSION' ) ? MT_MCP_VERSION : '',
+						'high_risk_allowed' => McpSupport::high_risk_allowed(),
+						'auth_header_probe' => array_values(
+							array_map(
+								static function ( $c ) {
+									return array(
+										'ok'     => ! empty( $c['ok'] ),
+										'detail' => isset( $c['detail'] ) ? $c['detail'] : '',
+										'waf'    => isset( $c['waf_signals'] ) ? $c['waf_signals'] : array(),
+									);
+								},
+								array_filter(
+									$checks,
+									static function ( $c ) {
+										return isset( $c['key'] ) && 'auth_header_probe' === $c['key'];
+									}
+								)
+							)
+						),
 					)
 				)
 			),

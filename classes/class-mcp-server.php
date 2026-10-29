@@ -455,7 +455,7 @@ Writes are currently {$writes}. Use get_site_health for install health; list_rev
 {$agents_block}{$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
 
 Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep, session_plan) or copy Recipes from Settings → MT MCP → Recipes.
-Use resources site://context, site://agents, site://changelog, site://sitemap, and acf://schema/{post_type} for quick context pulls.
+Use resources site://context, site://agents, site://changelog, site://sitemap, menu://{location}, media://missing-alt, and acf://schema/{post_type} for quick context pulls.
 TXT;
 	}
 
@@ -1485,10 +1485,11 @@ TXT;
 			),
 			array(
 				'name'        => 'set_write_gates',
-				'description' => 'Set pause_writes (incident freeze), force_draft (new posts forced to draft + needs_review), and/or site_brief owner rules.',
+				'description' => 'Set pause_writes (incident freeze), force_draft (new posts forced to draft + needs_review), allow_high_risk (permanent delete / redirect wipe), and/or site_brief owner rules. allow_high_risk requires manage_options.',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
+						'allow_high_risk' => array( 'type' => 'boolean' ),
 						'pause_writes' => array( 'type' => 'boolean' ),
 						'force_draft'  => array( 'type' => 'boolean' ),
 						'site_brief'   => array( 'type' => 'string' ),
@@ -1991,6 +1992,29 @@ TXT;
 			);
 		}
 
+		$resources[] = array(
+			'uri'         => 'media://missing-alt',
+			'name'        => 'Media missing alt',
+			'description' => 'Capped report of attachments missing alt text (media_alt_report).',
+			'mimeType'    => 'application/json',
+		);
+
+		$locations = get_nav_menu_locations();
+		if ( is_array( $locations ) ) {
+			foreach ( array_keys( $locations ) as $loc ) {
+				$loc = sanitize_key( $loc );
+				if ( ! $loc ) {
+					continue;
+				}
+				$resources[] = array(
+					'uri'         => 'menu://' . $loc,
+					'name'        => 'Menu: ' . $loc,
+					'description' => 'Nav menu assigned to theme location ' . $loc,
+					'mimeType'    => 'application/json',
+				);
+			}
+		}
+
 		return $resources;
 	}
 
@@ -2010,6 +2034,14 @@ TXT;
 		} elseif ( 0 === strpos( $uri, 'acf://schema/' ) ) {
 			$type = sanitize_key( substr( $uri, strlen( 'acf://schema/' ) ) );
 			$text = wp_json_encode( $this->handlers->get_acf_schema( array( 'post_type' => $type ) ) );
+		} elseif ( 'media://missing-alt' === $uri ) {
+			$text = wp_json_encode( $this->handlers->media_alt_report( array( 'limit' => 50 ) ) );
+		} elseif ( 0 === strpos( $uri, 'menu://' ) ) {
+			$loc = sanitize_key( substr( $uri, strlen( 'menu://' ) ) );
+			if ( ! $loc ) {
+				throw new \Exception( 'menu:// requires a location slug.' );
+			}
+			$text = wp_json_encode( $this->handlers->get_menu( array( 'location' => $loc ) ) );
 		} else {
 			throw new \Exception( 'Unknown resource URI: ' . $uri );
 		}
