@@ -478,6 +478,97 @@ TXT;
 				'description' => 'Diagnose MCP connectivity: HTTPS, .well-known discovery (must be 200 not 301), MCP endpoint, REST health, write gates, WAF hints. Returns paste_for_support (secrets redacted).',
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 			),
+			
+			array(
+				'name'        => 'list_updates',
+				'description' => 'List available WordPress core and plugin updates (from→to). Read-only. Confirm ids with the user before start_update_session.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'force_check' => array( 'type' => 'boolean', 'description' => 'Refresh update transients from wordpress.org' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'start_update_session',
+				'description' => 'Start a one-at-a-time update session with approved package ids from list_updates. Requires Allow MCP updates. Optional smoke_urls, form_probe, edit_probe_post_id.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'ids'                 => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'smoke_urls'          => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'form_probe'          => array( 'type' => 'object' ),
+						'edit_probe_post_id'  => array( 'type' => 'integer' ),
+						'allow_self_update'   => array( 'type' => 'boolean' ),
+						'force_check'         => array( 'type' => 'boolean' ),
+						'dry_run'             => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'ids' ),
+				),
+			),
+			array(
+				'name'        => 'get_update_session',
+				'description' => 'Get update session status/queue/log. Omit session_id to list recent sessions for this user.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
+				'name'        => 'update_package',
+				'description' => 'Update one package in a session (plugin zip-snapshotted first). Core needs acknowledge_core_no_zip_rollback=true.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+						'id'         => array( 'type' => 'string' ),
+						'force'      => array( 'type' => 'boolean' ),
+						'acknowledge_core_no_zip_rollback' => array( 'type' => 'boolean' ),
+						'dry_run'    => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'session_id', 'id' ),
+				),
+			),
+			array(
+				'name'        => 'rollback_package',
+				'description' => 'Reinstall a plugin from the pre-update zip snapshot. Core cannot be rolled back via MCP.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+						'id'         => array( 'type' => 'string' ),
+						'dry_run'    => array( 'type' => 'boolean' ),
+					),
+					'required'   => array( 'session_id', 'id' ),
+				),
+			),
+			array(
+				'name'        => 'run_smoke_checks',
+				'description' => 'After an update: quick URL checks, or full (URLs + optional form_probe + edit/undo).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+						'level'      => array( 'type' => 'string', 'description' => 'quick|full' ),
+						'after'      => array( 'type' => 'string', 'description' => 'Package id just updated' ),
+					),
+					'required'   => array( 'session_id' ),
+				),
+			),
+			array(
+				'name'        => 'finish_update_session',
+				'description' => 'Close session as completed or aborted and return the update report.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+						'status'     => array( 'type' => 'string', 'description' => 'completed|aborted' ),
+					),
+					'required'   => array( 'session_id' ),
+				),
+			),
 			array(
 				'name'        => 'unused_media_report',
 				'description' => 'Heuristic report of attachments not referenced as featured image or in a sample of post content/ACF. Review before delete.',
@@ -1678,6 +1769,13 @@ TXT;
 			'replace_attachment_file' => 'replace_attachment_file',
 			'list_users'             => 'list_users',
 			'bulk_update_posts'      => 'bulk_update_posts',
+			'list_updates'           => 'list_updates',
+			'start_update_session'   => 'start_update_session',
+			'get_update_session'     => 'get_update_session',
+			'update_package'         => 'update_package',
+			'rollback_package'       => 'rollback_package',
+			'run_smoke_checks'       => 'run_smoke_checks',
+			'finish_update_session'  => 'finish_update_session',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',
 			'list_acf_options_pages'=> 'list_acf_options_pages',

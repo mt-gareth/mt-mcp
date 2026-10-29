@@ -157,6 +157,13 @@ class McpAuth {
 			'check_links'              => 'edit_posts',
 			'get_site_health'          => 'manage_options',
 			'notify_write_batch'       => 'edit_posts',
+			'list_updates'             => 'update_plugins',
+			'start_update_session'     => 'update_plugins',
+			'get_update_session'       => 'update_plugins',
+			'update_package'           => 'update_plugins',
+			'rollback_package'         => 'update_plugins',
+			'run_smoke_checks'         => 'update_plugins',
+			'finish_update_session'    => 'update_plugins',
 		);
 
 		$cap = isset( $map[ $tool_name ] ) ? $map[ $tool_name ] : 'read';

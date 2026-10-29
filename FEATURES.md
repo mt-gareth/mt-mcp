@@ -67,6 +67,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] Recipes admin tab (search/filter cookbook + copy prompts) shared with MCP `prompts/*`
 
+### Shipped in 1.3.7
+
+- [x] Plugin/core update sessions: `list_updates`, one-at-a-time `update_package` with zip rollback, smoke checks, report (+ Recipes entry); gated by Allow MCP updates
+
 ---
 
 ## Capability map (what works today)
@@ -215,6 +219,7 @@ Makes sessions smoother or safer; not daily blockers.
 - [ ] **Alternate discovery URL** when hosts block `/.well-known/`
 - [ ] **Output / Auth-header / Sucuri diagnostics** folded into Doctor
 - [ ] **Pending OAuth client approval** queue (extra lock on prod Maptician-class sites)
+- [x] **Plugin / core update sessions** — list → confirm → one-at-a-time + zip rollback + smoke checks (Allow MCP updates)
 - [ ] **Allowlisted cache flush** (PHP, no shell)
 - [ ] **Meta-key allowlist** for any generic meta writes
 - [ ] **High-risk second lock** — permanent delete / redirect wipe need extra toggle

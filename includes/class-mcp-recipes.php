@@ -288,6 +288,18 @@ class McpRecipes {
 				'tags'       => array( 'templates', 'theme' ),
 				'prompt'     => "Call list_theme_templates (and describe_post_type for page if useful).\n\nReturn theme name, stylesheet, and template file → label map. Read only.",
 			),
+
+			array(
+				'id'         => 'plugin-core-updates',
+				'title'      => 'Plugin & core update session',
+				'summary'    => 'List updates, confirm packages, update one-at-a-time with zip rollback, smoke-check after each, full suite + report at the end.',
+				'category'   => 'maintenance',
+				'difficulty' => 'advanced',
+				'minutes'    => 45,
+				'writes'     => true,
+				'tags'       => array( 'updates', 'plugins', 'core', 'rollback', 'smoke' ),
+				'prompt'     => "Run a controlled WordPress update session on this site via MT MCP.\n\nKey pages to smoke-test: [home + 2–3 critical URLs]\nOptional form probe: [url + fields + success text, or none]\nOptional edit-probe post ID (draft/test page): [id or none]\n\n1. get_site_context — confirm environment and updates_allowed. If updates_allowed is false, tell me to enable Settings → MT MCP → Allow MCP plugin/core updates and stop.\n2. list_updates (force_check:true). Show a table: type, name, id, from → to. Flag MT MCP itself; do not include it unless I explicitly allow_self_update.\n3. Ask me which ids to update. Do not start until I confirm the list.\n4. start_update_session with those ids, smoke_urls, and optional form_probe / edit_probe_post_id.\n5. For each pending package, in order:\n   a. update_package (session_id + id). For wordpress core, only with acknowledge_core_no_zip_rollback=true after I confirm a host backup exists.\n   b. run_smoke_checks level=quick, after=id.\n   c. If checks fail: rollback_package for that id (plugins only), re-check, then stop and report. Do not continue the queue.\n6. After all succeed: run_smoke_checks level=full.\n7. finish_update_session status=completed and present the report (packages, from/to, rollbacks, check results).\n\nI may say stop / rollback / abort at any step — honor that (finish_update_session status=aborted if ending early).\nNever update everything in one call. Prefer staging over production.",
+			),
 		);
 
 		/**

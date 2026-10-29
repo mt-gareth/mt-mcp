@@ -22,6 +22,7 @@ class McpSupport {
 	const OPTION_DCR_HOSTS   = 'mt_mcp_dcr_extra_hosts';
 	const OPTION_OP_RECEIPTS = 'mt_mcp_op_receipts';
 	const OPTION_UNDO_JOURNAL = 'mt_mcp_undo_journal';
+	const OPTION_ALLOW_UPDATES = 'mt_mcp_allow_updates';
 	const AUDIT_MAX_ENTRIES   = 200;
 	const UNDO_MAX_ENTRIES    = 50;
 	const UNDO_TTL_SECONDS    = 259200; // 72 hours
@@ -59,6 +60,7 @@ class McpSupport {
 		'audit'      => 'MCP audit log',
 		'transfer'   => 'Export / import packages',
 		'system'     => 'Site health & skill generator',
+		'updates'    => 'Plugin / core updates',
 	);
 
 	const WRITE_TOOLS = array(
@@ -100,6 +102,11 @@ class McpSupport {
 		'import_posts',
 		'restore_revision',
 		'notify_write_batch',
+		'start_update_session',
+		'update_package',
+		'rollback_package',
+		'run_smoke_checks',
+		'finish_update_session',
 	);
 
 	/**
@@ -230,6 +237,14 @@ class McpSupport {
 			'confirm_dangerous_op'   => 'system',
 			'generate_cursor_skill'  => 'system',
 			'notify_write_batch'     => 'system',
+			'list_updates'           => 'updates',
+			'start_update_session'   => 'updates',
+			'get_update_session'     => 'updates',
+			'update_package'         => 'updates',
+			'rollback_package'       => 'updates',
+			'run_smoke_checks'       => 'updates',
+			'finish_update_session'  => 'updates',
+
 		);
 		return isset( $map[ $tool ] ) ? $map[ $tool ] : null;
 	}

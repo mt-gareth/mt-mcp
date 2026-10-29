@@ -68,6 +68,7 @@ class McpToolHandlers {
 				'writes_enabled' => (bool) get_option( McpSupport::OPTION_ALLOW_WRITES ),
 				'pause_writes'   => McpSupport::writes_paused(),
 				'force_draft'    => McpSupport::force_draft_enabled(),
+				'updates_allowed'=> McpUpdates::updates_allowed(),
 				'site_brief'     => McpSupport::site_brief(),
 				'tool_groups'    => McpSupport::enabled_groups(),
 				'three_gates'    => McpSupport::three_gate_status(),
@@ -4764,6 +4765,61 @@ MD;
 			'updated' => count( array_filter( $results, function ( $r ) { return ! empty( $r['ok'] ); } ) ),
 			'results' => $results,
 		);
+	}
+
+	public function list_updates( $args = array() ) {
+		return McpUpdates::list_updates( $args );
+	}
+
+	public function start_update_session( $args ) {
+		return McpUpdates::start_session( $args );
+	}
+
+	public function get_update_session( $args ) {
+		$session_id = isset( $args['session_id'] ) ? sanitize_text_field( $args['session_id'] ) : '';
+		if ( ! $session_id ) {
+			// Latest active session for this user.
+			$all = McpUpdates::get_sessions();
+			$mine = array();
+			foreach ( $all as $s ) {
+				if ( ! empty( $s['user_id'] ) && (int) $s['user_id'] === get_current_user_id() ) {
+					$mine[] = $s;
+				}
+			}
+			usort(
+				$mine,
+				static function ( $a, $b ) {
+					return strcmp( isset( $b['created_at'] ) ? $b['created_at'] : '', isset( $a['created_at'] ) ? $a['created_at'] : '' );
+				}
+			);
+			if ( empty( $mine ) ) {
+				return array( 'sessions' => array(), 'hint' => 'No sessions yet. list_updates → start_update_session.' );
+			}
+			return array(
+				'sessions' => array_map( array( McpUpdates::class, 'summarize_session' ), array_slice( $mine, 0, 5 ) ),
+			);
+		}
+		$session = McpUpdates::get_session( $session_id );
+		if ( ! $session ) {
+			throw new \Exception( 'Update session not found.' );
+		}
+		return McpUpdates::summarize_session( $session );
+	}
+
+	public function update_package( $args ) {
+		return McpUpdates::update_package( $args );
+	}
+
+	public function rollback_package( $args ) {
+		return McpUpdates::rollback_package( $args );
+	}
+
+	public function run_smoke_checks( $args ) {
+		return McpUpdates::run_smoke_checks( $args );
+	}
+
+	public function finish_update_session( $args ) {
+		return McpUpdates::finish_session( $args );
 	}
 
 }

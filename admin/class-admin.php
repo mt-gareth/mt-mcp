@@ -92,6 +92,11 @@ class Admin {
 				update_option( McpSupport::OPTION_FORCE_DRAFT, $val ? '1' : '' );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
+			case 'allow_updates':
+				$val = ! empty( $raw ) && '0' !== (string) $raw && 'false' !== (string) $raw;
+				update_option( McpUpdates::OPTION_ALLOW_UPDATES, $val ? '1' : '' );
+				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
+
 			case 'site_brief':
 				$val = sanitize_textarea_field( (string) $raw );
 				if ( strlen( $val ) > 2000 ) {
@@ -537,6 +542,16 @@ class Admin {
 					<span>Force draft on create</span>
 				</label>
 				<p class="mt-mcp-help">New posts are forced to draft and marked <code>_mt_mcp_needs_review</code> for human Preview/Publish.</p>
+
+				<label class="mt-mcp-toggle">
+					<input type="checkbox"
+						   class="mt-mcp-autosave"
+						   data-key="allow_updates"
+						   value="1"
+						   <?php checked( get_option( McpUpdates::OPTION_ALLOW_UPDATES ) ); ?> />
+					<span>Allow MCP plugin / core updates</span>
+				</label>
+				<p class="mt-mcp-help">Off by default. Enables one-at-a-time update sessions with zip snapshots for plugin rollback. Prefer staging; core has no MCP zip rollback (use host backup).</p>
 
 				<label class="mt-mcp-field">
 					<span>Site Brief (agent-immutable owner rules)</span>
