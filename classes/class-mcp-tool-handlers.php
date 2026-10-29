@@ -1776,12 +1776,13 @@ class McpToolHandlers {
 		$query = new \WP_Query( $query_args );
 		$out   = array();
 		foreach ( $query->posts as $att ) {
+			$aid = (int) $att->ID;
 			$out[] = array(
-				'id'    => $att->ID,
+				'id'    => $aid,
 				'title' => get_the_title( $att ),
-				'url'   => wp_get_attachment_url( $att ) ?: null,
+				'url'   => wp_get_attachment_url( $aid ) ?: null,
 				'mime'  => $att->post_mime_type,
-				'alt'   => get_post_meta( $att->ID, '_wp_attachment_image_alt', true ),
+				'alt'   => get_post_meta( $aid, '_wp_attachment_image_alt', true ),
 				'date'  => $att->post_date,
 			);
 		}
@@ -2819,6 +2820,10 @@ class McpToolHandlers {
 		if ( ! function_exists( 'get_plugin_updates' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/update.php';
 		}
+		// wp_check_php_version() and related Site Health helpers live here.
+		if ( ! function_exists( 'wp_check_php_version' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/misc.php';
+		}
 
 		$health = \WP_Site_Health::get_instance();
 		$tests  = array();
@@ -3167,9 +3172,11 @@ MD;
 					break;
 				}
 			}
+			$index_count = count( $urls );
 			if ( $looks_index ) {
 				$child_urls = array();
-				foreach ( array_slice( $urls, 0, 5 ) as $child ) {
+				// Walk more child sitemaps so truncated:false is honest when Yoast has many.
+				foreach ( array_slice( $urls, 0, 20 ) as $child ) {
 					if ( ! preg_match( '/\.xml(\.gz)?(\?|$)/i', $child ) ) {
 						continue;
 					}
@@ -3198,8 +3205,10 @@ MD;
 					$urls = $child_urls;
 				}
 			}
-			$urls  = array_values( array_unique( array_slice( $urls, 0, $limit ) ) );
-			$total = count( $urls );
+			$pre_slice = count( $urls );
+			$urls      = array_values( array_unique( array_slice( $urls, 0, $limit ) ) );
+			$total     = $pre_slice;
+			$truncated = ( $pre_slice > $limit ) || ( $looks_index && $index_count > 20 );
 		} else {
 			$types = get_post_types( array( 'public' => true ), 'names' );
 			$query = new \WP_Query(
@@ -3213,7 +3222,8 @@ MD;
 					'order'          => 'DESC',
 				)
 			);
-			$total = (int) $query->found_posts;
+			$total     = (int) $query->found_posts;
+			$truncated = $total > $limit;
 			foreach ( $query->posts as $id ) {
 				$url = get_permalink( $id );
 				if ( $url ) {
@@ -3272,6 +3282,11 @@ MD;
 				break;
 			}
 		}
+		if ( ! isset( $truncated ) ) {
+			$truncated = $total > $checked || count( $issues ) >= 50;
+		} else {
+			$truncated = $truncated || $total > $checked || count( $issues ) >= 50;
+		}
 		return array(
 			'checked'     => $checked,
 			'total'       => $total,
@@ -3280,7 +3295,10 @@ MD;
 			'check_body'  => $check_body,
 			'issue_count' => count( $issues ),
 			'issues'      => $issues,
-			'truncated'   => $total > $checked || count( $issues ) >= 50,
+			'truncated'   => (bool) $truncated,
+			'hint'        => $truncated
+				? 'Sample capped by limit (max 100). Pass source=sitemap and raise limit, or page via posts source orderby=modified.'
+				: null,
 		);
 	}
 
@@ -4132,13 +4150,18 @@ MD;
 			$checks[] = array( 'key' => 'mcp_endpoint', 'ok' => false, 'detail' => $mcp_probe->get_error_message(), 'url' => $mcp );
 		} else {
 			$code = (int) wp_remote_retrieve_response_code( $mcp_probe );
+			// 403 from Cloudflare/nginx on server-side loopback is common; live clients still work.
+			$ok_codes = array( 200, 204, 401, 403 );
 			$checks[] = array(
 				'key'    => 'mcp_endpoint',
-				'ok'     => in_array( $code, array( 200, 204, 401 ), true ),
-				'detail' => 'OPTIONS HTTP ' . $code . ' (401 expected without auth)',
+				'ok'     => in_array( $code, $ok_codes, true ),
+				'detail' => 'OPTIONS HTTP ' . $code . ( 403 === $code
+					? ' (WAF/loopback may block server self-check; ignore if agents connect fine)'
+					: ' (401 expected without auth)' ),
 				'url'    => $mcp,
 				'www_authenticate' => wp_remote_retrieve_header( $mcp_probe, 'www-authenticate' ),
 				'cache_control' => wp_remote_retrieve_header( $mcp_probe, 'cache-control' ),
+				'severity' => ( 403 === $code ),
 			);
 		}
 
@@ -4213,6 +4236,8 @@ MD;
 			$header_reached = ( 401 === $acode && $awww ) || ( 401 === $acode && $json_ok && ! $is_html );
 			$stripped_suspect = ( 401 === $acode && ! $awww && ! $is_html ) || ( in_array( $acode, array( 200, 403 ), true ) && $is_html );
 			$ok_auth = $header_reached && ! $is_html && empty( $waf_sig );
+			// Server→self 403 is often WAF/loopback; live OAuth clients can still work.
+			$loopback_waf = ( 403 === $acode );
 			$detail = 'POST+Bearer HTTP ' . $acode;
 			if ( $is_html ) {
 				$detail .= '; body looks like HTML (WAF/login page?), not MCP JSON';
@@ -4223,9 +4248,13 @@ MD;
 			if ( $waf_sig ) {
 				$detail .= '; waf_signals=' . implode( ',', array_unique( $waf_sig ) );
 			}
+			if ( $loopback_waf ) {
+				$detail .= '; treat as advisory if agents already connect';
+			}
 			$checks[] = array(
 				'key'              => 'auth_header_probe',
-				'ok'               => $ok_auth,
+				'ok'               => $ok_auth || $loopback_waf,
+				'advisory'         => $loopback_waf && ! $ok_auth,
 				'detail'           => $detail,
 				'content_type'     => $act,
 				'www_authenticate' => $awww ? '[present]' : '',
@@ -4411,10 +4440,17 @@ MD;
 				break;
 			}
 		}
+		$undoable = McpSupport::UNDOABLE_TOOLS;
+		$hint     = 'Use get_change for before/written/now; undo_change with token to restore. Never touches OAuth/MCP credentials.';
+		if ( empty( $items ) ) {
+			$hint = 'Undo journal is empty. Only ' . implode( ', ', $undoable )
+				. ' record undo snapshots (not bulk_update_yoast / menus / redirects). Audit log (get_audit_log) still lists those writes. If undoable writes happened recently and this is empty, the snapshot may have failed to persist — re-try a small update_post and check for an undo.token in the response.';
+		}
 		return array(
-			'items' => $items,
-			'ttl_hours' => (int) ( McpSupport::UNDO_TTL_SECONDS / 3600 ),
-			'hint'  => 'Use get_change for before/written/now; undo_change with token to restore. Never touches OAuth/MCP credentials.',
+			'items'          => $items,
+			'ttl_hours'      => (int) ( McpSupport::UNDO_TTL_SECONDS / 3600 ),
+			'undoable_tools' => $undoable,
+			'hint'           => $hint,
 		);
 	}
 
@@ -4893,6 +4929,7 @@ MD;
 
 		$seen  = array();
 		$links = array();
+		$home  = untrailingslashit( home_url() );
 		foreach ( $posts as $p ) {
 			if ( ! $p ) {
 				continue;
@@ -4904,10 +4941,14 @@ MD;
 					$html .= ' ' . wp_json_encode( $acf );
 				}
 			}
-			if ( preg_match_all( '/https?:\/\/[^\s"\'<>]+/i', $html, $m ) ) {
+			// Absolute http(s) plus root-relative paths common in ACF link fields.
+			if ( preg_match_all( '/(?:https?:\/\/[^\s"\'<>]+|(?<![a-z0-9])\/[a-z0-9][^\s"\'<>]*)/i', $html, $m ) ) {
 				foreach ( $m[0] as $href ) {
 					$href = rtrim( $href, '.,);]' );
-					$key  = strtolower( $href );
+					if ( 0 === strpos( $href, '/' ) ) {
+						$href = $home . $href;
+					}
+					$key = strtolower( $href );
 					if ( isset( $seen[ $key ] ) ) {
 						continue;
 					}
@@ -4929,6 +4970,7 @@ MD;
 					'timeout'     => 8,
 					'redirection' => 3,
 					'sslverify'   => $ssl,
+					'headers'     => array( 'User-Agent' => 'Mozilla/5.0 (compatible; MT-MCP-LinkCheck/1.0)' ),
 				)
 			);
 			if ( is_wp_error( $res ) ) {
@@ -4939,7 +4981,10 @@ MD;
 						'timeout'     => 8,
 						'redirection' => 3,
 						'sslverify'   => $ssl,
-						'headers'     => array( 'Range' => 'bytes=0-0' ),
+						'headers'     => array(
+							'Range'      => 'bytes=0-0',
+							'User-Agent' => 'Mozilla/5.0 (compatible; MT-MCP-LinkCheck/1.0)',
+						),
 					)
 				);
 			}
@@ -4948,24 +4993,42 @@ MD;
 					'url'     => $link['url'],
 					'post_id' => $link['post_id'],
 					'ok'      => false,
+					'verdict' => 'error',
 					'error'   => $res->get_error_message(),
 				);
 				continue;
 			}
-			$code = (int) wp_remote_retrieve_response_code( $res );
-			$results[] = array(
+			$code     = (int) wp_remote_retrieve_response_code( $res );
+			$final    = wp_remote_retrieve_header( $res, 'location' );
+			// Bot walls (403/401/429) are not the same as a dead link.
+			$blocked  = in_array( $code, array( 401, 403, 429 ), true );
+			$ok       = ( $code >= 200 && $code < 400 ) || $blocked;
+			$verdict  = $blocked ? 'blocked' : ( ( $code >= 200 && $code < 400 ) ? 'ok' : 'broken' );
+			$row      = array(
 				'url'     => $link['url'],
 				'post_id' => $link['post_id'],
-				'ok'      => $code >= 200 && $code < 400,
+				'ok'      => $ok,
+				'verdict' => $verdict,
 				'status'  => $code,
 			);
+			if ( $final && $code >= 300 && $code < 400 ) {
+				$row['redirected_to'] = $final;
+			}
+			if ( $blocked ) {
+				$row['note'] = 'Host blocked the checker (bot wall); not counted as broken.';
+			}
+			$results[] = $row;
 		}
-		$broken = array_values( array_filter( $results, function ( $r ) { return empty( $r['ok'] ); } ) );
+		$broken  = array_values( array_filter( $results, function ( $r ) { return isset( $r['verdict'] ) && 'broken' === $r['verdict']; } ) );
+		$blocked = array_values( array_filter( $results, function ( $r ) { return isset( $r['verdict'] ) && 'blocked' === $r['verdict']; } ) );
 		return array(
-			'checked' => count( $results ),
-			'broken'  => count( $broken ),
-			'results' => $results,
-			'broken_links' => $broken,
+			'checked'       => count( $results ),
+			'broken'        => count( $broken ),
+			'blocked'       => count( $blocked ),
+			'results'       => $results,
+			'broken_links'  => $broken,
+			'blocked_links' => $blocked,
+			'hint'          => 'ACF relative links are expanded against home_url. 401/403/429 = blocked (not broken).',
 		);
 	}
 
@@ -5115,29 +5178,31 @@ MD;
 			$used[ (int) $fid ] = true;
 		}
 
-		// Content / excerpt URLs and ids in a sample of recent posts.
-		$posts = get_posts(
+		// Always include front page + a wider sample — "200 most recent" misses stale home/ACF hubs.
+		$must = array_filter(
+			array_map(
+				'intval',
+				array(
+					(int) get_option( 'page_on_front' ),
+					(int) get_option( 'page_for_posts' ),
+				)
+			)
+		);
+		$sample = get_posts(
 			array(
 				'post_type'      => 'any',
 				'post_status'    => array( 'publish', 'draft', 'private', 'pending', 'future' ),
-				'posts_per_page' => 200,
+				'posts_per_page' => 400,
 				'fields'         => 'ids',
+				'orderby'        => 'modified',
+				'order'          => 'DESC',
 			)
 		);
+		$posts = array_values( array_unique( array_merge( $must, $sample ) ) );
 		$upload = wp_upload_dir();
 		$baseurl = trailingslashit( $upload['baseurl'] );
-		foreach ( $posts as $pid ) {
-			$p = get_post( $pid );
-			if ( ! $p ) {
-				continue;
-			}
-			$blob = $p->post_content . ' ' . $p->post_excerpt;
-			if ( function_exists( 'get_fields' ) ) {
-				$acf = get_fields( $pid );
-				if ( is_array( $acf ) ) {
-					$blob .= ' ' . wp_json_encode( $acf );
-				}
-			}
+
+		$scan_blob = static function ( $blob ) use ( &$used, $ids, $baseurl ) {
 			if ( preg_match_all( '/\b(\d{2,})\b/', $blob, $m ) ) {
 				foreach ( $m[1] as $maybe ) {
 					$maybe = (int) $maybe;
@@ -5156,6 +5221,29 @@ MD;
 						$used[ $aid ] = true;
 					}
 				}
+			}
+		};
+
+		foreach ( $posts as $pid ) {
+			$p = get_post( $pid );
+			if ( ! $p ) {
+				continue;
+			}
+			$blob = $p->post_content . ' ' . $p->post_excerpt;
+			if ( function_exists( 'get_fields' ) ) {
+				$acf = get_fields( $pid );
+				if ( is_array( $acf ) ) {
+					$blob .= ' ' . wp_json_encode( $acf );
+				}
+			}
+			$scan_blob( $blob );
+		}
+
+		// Options-page ACF (headers/footers/site settings often reference media).
+		if ( function_exists( 'get_fields' ) ) {
+			$opt = get_fields( 'option' );
+			if ( is_array( $opt ) ) {
+				$scan_blob( wp_json_encode( $opt ) );
 			}
 		}
 
@@ -5182,9 +5270,10 @@ MD;
 		}
 		return array(
 			'scanned_attachments' => count( $ids ),
+			'scanned_posts'       => count( $posts ),
 			'unused_count'        => count( $unused ),
 			'items'               => $unused,
-			'hint'                => 'Heuristic: not featured, and ID/URL not found in a sample of 200 posts + ACF. Review before deleting.',
+			'hint'                => 'Heuristic: not featured, and ID/URL not found in front page + ~400 recently modified posts + ACF options. Still review before deleting.',
 		);
 	}
 
@@ -5484,6 +5573,17 @@ MD;
 	public function permalink_clash_report( $args = array() ) {
 		global $wpdb;
 		$limit = isset( $args['limit'] ) ? max( 1, min( 200, (int) $args['limit'] ) ) : 50;
+		$total = (int) $wpdb->get_var(
+			"SELECT COUNT(*) FROM (
+				SELECT post_name
+				FROM {$wpdb->posts}
+				WHERE post_status IN ('publish','private','draft','pending','future')
+				  AND post_type NOT IN ('revision','nav_menu_item','attachment','custom_css','customize_changeset')
+				  AND post_name <> ''
+				GROUP BY post_name
+				HAVING COUNT(*) > 1
+			) clashes"
+		);
 		$rows = $wpdb->get_results(
 			"SELECT post_name, COUNT(*) AS c, GROUP_CONCAT(ID ORDER BY ID SEPARATOR ',') AS ids, GROUP_CONCAT(post_type ORDER BY ID SEPARATOR ',') AS types
 			 FROM {$wpdb->posts}
@@ -5517,9 +5617,12 @@ MD;
 			);
 		}
 		return array(
-			'clash_count' => count( $clashes ),
-			'clashes'     => $clashes,
-			'hint'        => 'Same post_name across posts/CPTs can confuse permalinks and imports. Prefer unique slugs per site.',
+			'clash_count'       => $total,
+			'returned'          => count( $clashes ),
+			'limit'             => $limit,
+			'truncated'         => $total > count( $clashes ),
+			'clashes'           => $clashes,
+			'hint'              => 'Same post_name across posts/CPTs can confuse permalinks and imports. Prefer unique slugs per site.',
 		);
 	}
 

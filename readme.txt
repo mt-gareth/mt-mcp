@@ -4,7 +4,7 @@ Tags: mcp, ai, oauth, cursor, claude, acf, rest-api
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.17
+Stable tag: 1.3.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,12 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 
 == Changelog ==
 
+= 1.3.18 =
+* Fix media_alt_report (was listed but not dispatched — “Unknown tool”)
+* Fix list_media url:null; CPT/root URL → post id resolution; check_links relative URLs + 403≠broken
+* sitemap_diff truncated honesty; unused_media includes front page + options ACF; Site Health loads misc.php
+* list_changes clarifies undoable tools vs audit; permalink_clash_report returns real clash_count; audit logs group_key
+
 = 1.3.17 =
 * Connection labels are per OAuth grant (grant_id), not per user+client — renaming one Claude session no longer renames the others
 * Active grants table shows grant short id; Revoke removes only that grant family
@@ -74,6 +80,9 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk second lock; menu:// and media://missing-alt resources; Doctor auth/WAF probe
 
 == Upgrade Notice ==
+
+= 1.3.18 =
+Bugfixes from Maptician read-only poke: media_alt_report dispatch, list_media URLs, CPT URL lookup, link/sitemap/health polish.
 
 = 1.3.17 =
 Per-grant connection labels (shared mt_admin + Claude no longer collide). Re-label rows once after update if needed.

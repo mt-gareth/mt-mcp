@@ -1001,7 +1001,7 @@ TXT;
 			),
 			array(
 				'name'        => 'media_alt_report',
-				'description' => 'Report attachments missing alt text: counts + ids + sample items. Feed ids into bulk_fill_media_alt / update_media.',
+				'description' => 'Report attachments missing alt text: counts + ids + sample items. Feed ids into bulk_fix_media_alt / update_media.',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -1974,6 +1974,7 @@ TXT;
 			'suggest_internal_links' => 'suggest_internal_links',
 			'validate_schema_ld'     => 'validate_schema_ld',
 			'sitemap_diff'           => 'sitemap_diff',
+			'media_alt_report'       => 'media_alt_report',
 			'bulk_fix_media_alt'  => 'bulk_fix_media_alt',
 			'schedule_post'          => 'schedule_post',
 			'notify_write_batch'     => 'notify_write_batch',

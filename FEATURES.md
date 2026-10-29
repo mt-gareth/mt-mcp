@@ -4,7 +4,7 @@ Standalone WordPress MCP server for Motion Tactic client work. Auth is **OAuth 2
 
 **Goal:** inventory, build, and update a typical MT site (ACF + classic, Yoast, media, menus, redirects, staging→prod) from Cursor/Claude — with dry-run, audit, undo, and user-scoped grants.
 
-**Current:** `1.3.17` (feature-locked) · ~37 Recipes · MCP prompts include `client_rollout`, `session_plan`, `seo_pass`, `content_inventory`, `acf_gap_check`, `launch_prep`.
+**Current:** `1.3.18` (feature-locked) · ~37 Recipes · MCP prompts include `client_rollout`, `session_plan`, `seo_pass`, `content_inventory`, `acf_gap_check`, `launch_prep`.
 
 ---
 
@@ -124,6 +124,7 @@ Only **open** work. Pull from Maybe only when a real client job needs it.
 | **1.3.15** | Plugins → Settings link; friendly Claude/truncated grant client names |
 | **1.3.16** | Plugin icons (`assets/`); Tested up to WP 7.1 |
 | **1.3.17** | Per-grant labels + revoke (`grant_id`); shared WP user + Claude no longer collide |
+| **1.3.18** | Maptician poke fixes: media_alt_report map, list_media URLs, CPT URL resolve, links/sitemap/health |
 
 ---
 

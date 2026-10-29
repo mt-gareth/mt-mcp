@@ -131,13 +131,13 @@ class McpRecipes {
 			array(
 				'id'         => 'media-alt-pass',
 				'title'      => 'Fill missing image alt text',
-				'summary'    => 'Report attachments missing alt, propose alts, then bulk_fill_media_alt / update_media after approval.',
+				'summary'    => 'Report attachments missing alt, propose alts, then bulk_fix_media_alt / update_media after approval.',
 				'category'   => 'media',
 				'difficulty' => 'beginner',
 				'minutes'    => 15,
 				'writes'     => true,
 				'tags'       => array( 'a11y', 'alt', 'media' ),
-				'prompt'     => "Fix missing image alt text on this site.\n\n1. media_alt_report — summarize counts and list sample IDs.\n2. Optionally acf_media_audit for broken ACF image refs / missing alts in fields.\n3. Propose alt text for up to 25 images (from filename/title/context). Show me the list.\n4. After approval, bulk_fill_media_alt or update_media per id. Prefer dry_run first if available.\n\nDo not replace files or delete attachments.",
+				'prompt'     => "Fix missing image alt text on this site.\n\n1. media_alt_report — summarize counts and list sample IDs.\n2. Optionally acf_media_audit for broken ACF image refs / missing alts in fields.\n3. Propose alt text for up to 25 images (from filename/title/context). Show me the list.\n4. After approval, bulk_fix_media_alt or update_media per id. Prefer dry_run first if available.\n\nDo not replace files or delete attachments.",
 			),
 			array(
 				'id'         => 'acf-media-audit',

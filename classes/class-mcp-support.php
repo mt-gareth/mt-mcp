@@ -643,7 +643,8 @@ class McpSupport {
 			'dry_run', 'apply', 'force_delete', 'confirm', 'operation', 'operation_id', 'state_token',
 			'limit', 'page', 'per_page', 'mime_type', 'provider', 'mode', 'action', 'scopes', 'expected_count',
 			'include_acf', 'include_taxonomies', 'include_featured', 'include_meta', 'ttl', 'max_bytes',
-			'pause_writes', 'force_draft', 'allow_non_draft', 'parent', 'parent_post_id', 'group_id',
+			'pause_writes', 'force_draft', 'allow_non_draft', 'parent', 'parent_post_id', 'group_id', 'group_key',
+			'options_page', 'label', 'grant_id', 'client_id', 'source', 'doc',
 		);
 		$out = array();
 		foreach ( $args as $k => $v ) {
@@ -704,12 +705,60 @@ class McpSupport {
 		$path  = isset( $parts['path'] ) ? $parts['path'] : '/';
 		$path  = '/' . ltrim( $path, '/' );
 
+		// Front page.
+		if ( '/' === $path || '' === trim( $path, '/' ) ) {
+			$front = (int) get_option( 'page_on_front' );
+			if ( $front ) {
+				return $front;
+			}
+		}
+
 		$target  = home_url( $path );
 		$post_id = url_to_postid( $target );
 
 		if ( ! $post_id ) {
 			$alt     = ( '/' === substr( $target, -1 ) ) ? rtrim( $target, '/' ) : trailingslashit( $target );
 			$post_id = url_to_postid( $alt );
+		}
+
+		// Hierarchical pages (and other hierarchical types via get_page_by_path).
+		if ( ! $post_id ) {
+			$page_path = trim( $path, '/' );
+			if ( $page_path ) {
+				$page = get_page_by_path( $page_path, OBJECT, 'page' );
+				if ( $page ) {
+					$post_id = (int) $page->ID;
+				}
+			}
+		}
+
+		/*
+		 * Custom post types with root permalinks (e.g. /conference-rooms/) often
+		 * fail url_to_postid(). Fall back to matching the last path segment as
+		 * post_name across public types.
+		 */
+		if ( ! $post_id ) {
+			$slug = basename( untrailingslashit( $path ) );
+			$slug = sanitize_title( $slug );
+			if ( $slug ) {
+				$types = get_post_types( array( 'public' => true ), 'names' );
+				unset( $types['attachment'] );
+				$q = new \WP_Query(
+					array(
+						'name'                   => $slug,
+						'post_type'              => array_values( $types ),
+						'post_status'            => array( 'publish', 'draft', 'private', 'pending', 'future' ),
+						'posts_per_page'         => 1,
+						'fields'                 => 'ids',
+						'no_found_rows'          => true,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+				if ( ! empty( $q->posts[0] ) ) {
+					$post_id = (int) $q->posts[0];
+				}
+			}
 		}
 
 		return (int) $post_id;
