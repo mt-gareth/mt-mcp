@@ -95,6 +95,14 @@ class Admin {
 			case 'allow_updates':
 				$val = ! empty( $raw ) && '0' !== (string) $raw && 'false' !== (string) $raw;
 				update_option( McpUpdates::OPTION_ALLOW_UPDATES, $val ? '1' : '' );
+				if ( $val ) {
+					McpUpdates::ensure_guard_mu_plugin();
+				}
+				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
+
+			case 'deadman_minutes':
+				$val = max( 1, min( 60, (int) $raw ) );
+				update_option( McpUpdates::OPTION_DEADMAN_MIN, $val );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
 			case 'site_brief':
@@ -551,7 +559,18 @@ class Admin {
 						   <?php checked( get_option( McpUpdates::OPTION_ALLOW_UPDATES ) ); ?> />
 					<span>Allow MCP plugin / core updates</span>
 				</label>
-				<p class="mt-mcp-help">Off by default. Enables one-at-a-time update sessions with zip snapshots for plugin rollback. Prefer staging; core has no MCP zip rollback (use host backup).</p>
+				<p class="mt-mcp-help">Off by default. Enables one-at-a-time update sessions with zip snapshots for plugin rollback. Prefer staging; core has no MCP zip rollback (use host backup). Installs a must-use Update Guard for timed auto-rollback if MCP dies.</p>
+
+				<label class="mt-mcp-field">
+					<span>Update dead-man timer (minutes)</span>
+					<input type="number"
+						   class="small-text mt-mcp-autosave"
+						   data-key="deadman_minutes"
+						   min="1"
+						   max="60"
+						   value="<?php echo (int) McpUpdates::deadman_minutes(); ?>" />
+				</label>
+				<p class="mt-mcp-help">After each plugin update, if smoke/confirm does not clear the timer, the MU guard restores the pre-update zip automatically. Emergency CLI: <code>wp --skip-plugins mt-mcp-guard rollback</code></p>
 
 				<label class="mt-mcp-field">
 					<span>Site Brief (agent-immutable owner rules)</span>

@@ -71,6 +71,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 
 - [x] Plugin/core update sessions: `list_updates`, one-at-a-time `update_package` with zip rollback, smoke checks, report (+ Recipes entry); gated by Allow MCP updates
 
+### Shipped in 1.3.8
+
+- [x] Dead-man auto-rollback MU-plugin + `wp --skip-plugins mt-mcp-guard rollback` / `confirm_update_ok`
+
 ---
 
 ## Capability map (what works today)

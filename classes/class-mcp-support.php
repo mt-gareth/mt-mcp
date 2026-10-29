@@ -107,6 +107,7 @@ class McpSupport {
 		'rollback_package',
 		'run_smoke_checks',
 		'finish_update_session',
+		'confirm_update_ok',
 	);
 
 	/**
@@ -244,6 +245,7 @@ class McpSupport {
 			'rollback_package'       => 'updates',
 			'run_smoke_checks'       => 'updates',
 			'finish_update_session'  => 'updates',
+			'confirm_update_ok'      => 'updates',
 
 		);
 		return isset( $map[ $tool ] ) ? $map[ $tool ] : null;

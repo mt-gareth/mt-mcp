@@ -558,6 +558,17 @@ TXT;
 				),
 			),
 			array(
+				'name'        => 'confirm_update_ok',
+				'description' => 'Disarm the dead-man auto-rollback timer after a plugin update (also done automatically when run_smoke_checks passes).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'session_id' => array( 'type' => 'string' ),
+						'id'         => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'finish_update_session',
 				'description' => 'Close session as completed or aborted and return the update report.',
 				'inputSchema' => array(
@@ -1775,6 +1786,7 @@ TXT;
 			'update_package'         => 'update_package',
 			'rollback_package'       => 'rollback_package',
 			'run_smoke_checks'       => 'run_smoke_checks',
+			'confirm_update_ok'      => 'confirm_update_ok',
 			'finish_update_session'  => 'finish_update_session',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',

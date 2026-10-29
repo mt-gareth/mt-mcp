@@ -75,6 +75,64 @@ class McpCli {
 		McpServer::flush_rewrites_now();
 		\WP_CLI::success( 'Flushed MCP rewrite rules.' );
 	}
+
+	/**
+	 * Show armed update dead-man pending (alias of mt-mcp-guard pending).
+	 *
+	 * When the site is 500ing, prefer:
+	 *   wp --skip-plugins mt-mcp-guard pending
+	 *
+	 * @when after_wp_load
+	 * @subcommand updates-pending
+	 */
+	public function updates_pending() {
+		McpUpdates::ensure_guard_mu_plugin();
+		$p = McpUpdates::read_pending();
+		if ( ! $p ) {
+			\WP_CLI::success( 'No pending dead-man rollback armed.' );
+			return;
+		}
+		$left = (int) $p['deadline_ts'] - time();
+		\WP_CLI::line( 'session:  ' . ( isset( $p['session_id'] ) ? $p['session_id'] : '' ) );
+		\WP_CLI::line( 'plugin:   ' . ( isset( $p['id'] ) ? $p['id'] : '' ) );
+		\WP_CLI::line( 'zip:      ' . ( isset( $p['zip'] ) ? $p['zip'] : '' ) );
+		\WP_CLI::line( 'deadline: ' . ( isset( $p['deadline'] ) ? $p['deadline'] : '' ) . ' (' . $left . 's left)' );
+		\WP_CLI::line( 'If MCP is down use: wp --skip-plugins mt-mcp-guard rollback' );
+	}
+
+	/**
+	 * Roll back a plugin from an update session snapshot.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--session=<id>]
+	 * : Update session id.
+	 *
+	 * [--id=<plugin>]
+	 * : Plugin file e.g. akismet/akismet.php
+	 *
+	 * [--yes]
+	 * : Skip confirm.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp mt-mcp rollback --session=upd_abc --id=eps-301-redirects/eps-301-redirects.php
+	 *
+	 * When HTTP is dead (plugin fatals), the MU-plugin CLI still works:
+	 *     wp --skip-plugins mt-mcp-guard rollback
+	 *
+	 * @when after_wp_load
+	 */
+	public function rollback( $args, $assoc ) {
+		McpUpdates::ensure_guard_mu_plugin();
+		if ( function_exists( 'mt_mcp_guard_read_pending' ) ) {
+			// Prefer guard implementation (same as --skip-plugins path).
+			$cli = new \MT_MCP_Guard_CLI();
+			$cli->rollback( $args, $assoc );
+			return;
+		}
+		\WP_CLI::error( 'Update guard MU-plugin not installed. Enable Allow MCP updates once, or copy mu-plugins/mt-mcp-update-guard.php into wp-content/mu-plugins/.' );
+	}
 }
 
 \WP_CLI::add_command( 'mt-mcp', __NAMESPACE__ . '\\McpCli' );

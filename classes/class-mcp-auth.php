@@ -164,6 +164,7 @@ class McpAuth {
 			'rollback_package'         => 'update_plugins',
 			'run_smoke_checks'         => 'update_plugins',
 			'finish_update_session'    => 'update_plugins',
+			'confirm_update_ok'        => 'update_plugins',
 		);
 
 		$cap = isset( $map[ $tool_name ] ) ? $map[ $tool_name ] : 'read';

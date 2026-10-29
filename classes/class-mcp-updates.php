@@ -10,12 +10,149 @@ class McpUpdates {
 
 	const OPTION_ALLOW_UPDATES = 'mt_mcp_allow_updates';
 	const OPTION_SESSIONS      = 'mt_mcp_update_sessions';
+	const OPTION_DEADMAN_MIN   = 'mt_mcp_update_deadman_minutes';
 	const SESSION_TTL          = 86400; // 24h
 	const MAX_SESSIONS         = 10;
 	const ROLLBACK_DIR         = 'mt-mcp-rollbacks';
+	const DEFAULT_DEADMAN_MIN  = 5;
 
 	public static function updates_allowed() {
 		return (bool) get_option( self::OPTION_ALLOW_UPDATES );
+	}
+
+	/**
+	 * Minutes until auto-rollback if confirm_update_ok is not received.
+	 */
+	public static function deadman_minutes() {
+		$m = (int) get_option( self::OPTION_DEADMAN_MIN, self::DEFAULT_DEADMAN_MIN );
+		if ( $m < 1 ) {
+			$m = 1;
+		}
+		if ( $m > 60 ) {
+			$m = 60;
+		}
+		return $m;
+	}
+
+	/**
+	 * Install/refresh the must-use update guard (dead-man + CLI under --skip-plugins).
+	 */
+	public static function ensure_guard_mu_plugin() {
+		$src = MT_MCP_PATH . 'mu-plugins/mt-mcp-update-guard.php';
+		if ( ! file_exists( $src ) ) {
+			return false;
+		}
+		if ( ! defined( 'WPMU_PLUGIN_DIR' ) ) {
+			return false;
+		}
+		if ( ! is_dir( WPMU_PLUGIN_DIR ) ) {
+			wp_mkdir_p( WPMU_PLUGIN_DIR );
+		}
+		$dest = trailingslashit( WPMU_PLUGIN_DIR ) . 'mt-mcp-update-guard.php';
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+		$src_body = file_get_contents( $src );
+		$dest_body = file_exists( $dest ) ? file_get_contents( $dest ) : '';
+		if ( $src_body && $src_body !== $dest_body ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+			file_put_contents( $dest, $src_body );
+		}
+		$guard_dir = WP_CONTENT_DIR . '/mt-mcp-guard';
+		if ( ! is_dir( $guard_dir ) ) {
+			wp_mkdir_p( $guard_dir );
+		}
+		return file_exists( $dest );
+	}
+
+	public static function pending_path() {
+		return WP_CONTENT_DIR . '/mt-mcp-guard/pending.json';
+	}
+
+	public static function read_pending() {
+		if ( function_exists( 'mt_mcp_guard_read_pending' ) ) {
+			return mt_mcp_guard_read_pending();
+		}
+		$path = self::pending_path();
+		if ( ! file_exists( $path ) ) {
+			return null;
+		}
+		$data = json_decode( (string) file_get_contents( $path ), true );
+		return is_array( $data ) ? $data : null;
+	}
+
+	public static function arm_deadman( $session_id, $item ) {
+		if ( empty( $item['snapshot'] ) || 'plugin' !== $item['type'] ) {
+			return null;
+		}
+		self::ensure_guard_mu_plugin();
+		$minutes = self::deadman_minutes();
+		$deadline_ts = time() + ( $minutes * MINUTE_IN_SECONDS );
+		$pending = array(
+			'session_id'  => $session_id,
+			'id'          => $item['id'],
+			'slug'        => isset( $item['slug'] ) ? $item['slug'] : dirname( $item['id'] ),
+			'name'        => isset( $item['name'] ) ? $item['name'] : $item['id'],
+			'zip'         => $item['snapshot'],
+			'from'        => $item['from'],
+			'to'          => $item['to'],
+			'armed_at'    => gmdate( 'c' ),
+			'deadline'    => gmdate( 'c', $deadline_ts ),
+			'deadline_ts' => $deadline_ts,
+			'minutes'     => $minutes,
+		);
+		if ( function_exists( 'mt_mcp_guard_write_pending' ) ) {
+			mt_mcp_guard_write_pending( $pending );
+		} else {
+			$dir = WP_CONTENT_DIR . '/mt-mcp-guard';
+			if ( ! is_dir( $dir ) ) {
+				wp_mkdir_p( $dir );
+			}
+			file_put_contents( self::pending_path(), wp_json_encode( $pending ) );
+		}
+		return $pending;
+	}
+
+	public static function clear_deadman( $session_id = '', $id = '' ) {
+		$pending = self::read_pending();
+		if ( ! $pending ) {
+			return array( 'cleared' => false, 'reason' => 'none_pending' );
+		}
+		if ( $session_id && isset( $pending['session_id'] ) && $pending['session_id'] !== $session_id ) {
+			throw new \Exception( 'Pending dead-man session does not match.' );
+		}
+		if ( $id && isset( $pending['id'] ) && $pending['id'] !== $id ) {
+			throw new \Exception( 'Pending dead-man plugin id does not match.' );
+		}
+		if ( function_exists( 'mt_mcp_guard_clear_pending' ) ) {
+			mt_mcp_guard_clear_pending();
+		} elseif ( file_exists( self::pending_path() ) ) {
+			unlink( self::pending_path() );
+		}
+		return array(
+			'cleared' => true,
+			'was'     => array(
+				'session_id' => isset( $pending['session_id'] ) ? $pending['session_id'] : '',
+				'id'         => isset( $pending['id'] ) ? $pending['id'] : '',
+			),
+		);
+	}
+
+	/**
+	 * Disarm dead-man after a successful smoke / explicit confirm.
+	 */
+	public static function confirm_update_ok( $args ) {
+		$session_id = isset( $args['session_id'] ) ? sanitize_text_field( $args['session_id'] ) : '';
+		$id         = isset( $args['id'] ) ? (string) $args['id'] : '';
+		$result     = self::clear_deadman( $session_id, $id );
+		if ( $session_id ) {
+			$session = self::get_session( $session_id );
+			if ( $session ) {
+				self::append_log( $session, 'confirmed', 'Update confirmed OK; dead-man disarmed', array( 'id' => $id ) );
+				self::put_session( $session );
+			}
+		}
+		$result['hint'] = 'Safe to continue the update queue.';
+		$result['pending'] = self::read_pending();
+		return $result;
 	}
 
 	public static function assert_updates_allowed() {
@@ -144,6 +281,7 @@ class McpUpdates {
 	 */
 	public static function start_session( $args ) {
 		self::assert_updates_allowed();
+		self::ensure_guard_mu_plugin();
 
 		$approved_ids = array();
 		if ( ! empty( $args['ids'] ) && is_array( $args['ids'] ) ) {
@@ -433,6 +571,15 @@ class McpUpdates {
 				$session['queue'][ $id ]['updated_at'] = gmdate( 'c' );
 				$session['queue'][ $id ]['error']      = null;
 				self::append_log( $session, 'updated', $item['name'] . ' ' . $item['from'] . ' → ' . $item['to'], array( 'id' => $id ) );
+				$deadman = self::arm_deadman( $session_id, $session['queue'][ $id ] );
+				if ( $deadman ) {
+					self::append_log(
+						$session,
+						'deadman_armed',
+						'Auto-rollback at ' . $deadman['deadline'] . ' unless confirm_update_ok / successful smoke',
+						array( 'id' => $id )
+					);
+				}
 			} elseif ( 'core' === $item['type'] ) {
 				if ( ! current_user_can( 'update_core' ) ) {
 					throw new \Exception( 'Cannot update_core.' );
@@ -478,12 +625,16 @@ class McpUpdates {
 		}
 
 		self::put_session( $session );
+		$pending = self::read_pending();
 		return array(
 			'session_id' => $session_id,
 			'id'         => $id,
 			'status'     => 'updated',
 			'item'       => $session['queue'][ $id ],
-			'next'       => 'run_smoke_checks with session_id (and optionally after=id). On failure, rollback_package.',
+			'deadman'    => $pending,
+			'next'       => $pending
+				? 'Immediately run_smoke_checks (after=id). On success the dead-man timer disarms. On failure call rollback_package. If MCP dies, wait for auto-rollback at deadline or: wp --skip-plugins mt-mcp-guard rollback'
+				: 'run_smoke_checks with session_id (and optionally after=id). On failure, rollback_package.',
 		);
 	}
 
@@ -553,13 +704,18 @@ class McpUpdates {
 		$session['queue'][ $id ]['error']  = null;
 		self::append_log( $session, 'rolled_back', $item['name'] . ' restored from snapshot', array( 'id' => $id ) );
 		self::put_session( $session );
+		try {
+			self::clear_deadman( $session_id, $id );
+		} catch ( \Throwable $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
+			self::clear_deadman();
+		}
 
 		return array(
 			'session_id' => $session_id,
 			'id'         => $id,
 			'status'     => 'rolled_back',
 			'item'       => $session['queue'][ $id ],
-			'note'       => 'Plugin restored from pre-update zip. Re-run smoke checks.',
+			'note'       => 'Plugin restored from pre-update zip. Dead-man disarmed. Re-run smoke checks.',
 		);
 	}
 
@@ -733,6 +889,27 @@ class McpUpdates {
 				'at'    => gmdate( 'c' ),
 			);
 		}
+		$disarmed = null;
+		if ( $ok ) {
+			// Successful smoke = all-clear for the armed package (or after=id).
+			try {
+				$disarmed = self::clear_deadman( $session_id, $after ? $after : '' );
+			} catch ( \Throwable $e ) {
+				$disarmed = array( 'cleared' => false, 'error' => $e->getMessage() );
+			}
+			if ( ! empty( $disarmed['cleared'] ) ) {
+				self::append_log( $session, 'confirmed', 'Smoke OK — dead-man disarmed', array( 'id' => $after ) );
+			}
+		}
+		$payload['deadman_disarmed'] = $disarmed;
+		$payload['deadman_pending']  = self::read_pending();
+		if ( $ok ) {
+			$payload['hint'] = 'quick' === $level
+				? 'Quick checks passed; dead-man disarmed. Continue update_package for next pending id, or run_smoke_checks level=full after all updates.'
+				: 'Full suite passed; dead-man disarmed. Call finish_update_session for the report.';
+		} else {
+			$payload['hint'] = 'Smoke checks failed. Call rollback_package now (do not wait for dead-man). If MCP is down: wp --skip-plugins mt-mcp-guard rollback';
+		}
 		self::append_log( $session, 'smoke', ( $ok ? 'passed' : 'failed' ) . ' (' . $level . ')' );
 		self::put_session( $session );
 
@@ -754,6 +931,11 @@ class McpUpdates {
 		$session['report'] = $report;
 		self::append_log( $session, $status, 'Session ' . $status );
 		self::put_session( $session );
+		try {
+			self::clear_deadman( $session_id );
+		} catch ( \Throwable $e ) {
+			self::clear_deadman();
+		}
 		return array(
 			'session_id' => $session_id,
 			'status'     => $status,
@@ -787,6 +969,7 @@ class McpUpdates {
 			'notes'       => array(
 				'Core updates cannot be zip-rolled-back via MCP — use host backup if needed.',
 				'Plugin rollbacks use pre-update zips in uploads/' . self::ROLLBACK_DIR . '.',
+				'If MCP dies after a plugin update: wait for the dead-man timer, or run: wp --skip-plugins mt-mcp-guard rollback',
 			),
 		);
 	}

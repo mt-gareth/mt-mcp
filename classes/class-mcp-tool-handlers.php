@@ -4822,4 +4822,8 @@ MD;
 		return McpUpdates::finish_session( $args );
 	}
 
+	public function confirm_update_ok( $args = array() ) {
+		return McpUpdates::confirm_update_ok( $args );
+	}
+
 }
