@@ -70,6 +70,8 @@ Install/update zip for WordPress (folder name \`mt-mcp\`).
 See readme.txt changelog."
   if gh release view "$TAG" >/dev/null 2>&1; then
     gh release upload "$TAG" "$ZIP_PATH" --clobber
+    # Tag rewrites / failed creates can leave a Draft; PUC only sees published releases.
+    gh release edit "$TAG" --draft=false >/dev/null
   else
     gh release create "$TAG" "$ZIP_PATH" \
       --title "MT MCP ${VERSION}" \
