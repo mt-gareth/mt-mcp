@@ -82,7 +82,7 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 == Upgrade Notice ==
 
 = 1.3.18 =
-Bugfixes from Maptician read-only poke: media_alt_report dispatch, list_media URLs, CPT URL lookup, link/sitemap/health polish.
+Bugfixes: media_alt_report dispatch, list_media URLs, CPT URL lookup, link/sitemap/health polish.
 
 = 1.3.17 =
 Per-grant connection labels (shared mt_admin + Claude no longer collide). Re-label rows once after update if needed.

@@ -349,21 +349,21 @@ class Admin {
 
 	/**
 	 * Site-specific MCP server key for agent configs (avoids clashing mt-mcp entries).
-	 * e.g. propio.d.mt.com → propio-local-mcp
-	 *      www.maptician.com (production) → maptician-prod-mcp
+	 * e.g. acme.d.mt.com → acme-local-mcp
+	 *      www.example.com (production) → example-prod-mcp
 	 */
 	public static function suggested_server_key() {
 		$host = wp_parse_url( home_url( '/' ), PHP_URL_HOST );
 		$host = $host ? strtolower( $host ) : 'site';
 		$env  = McpSupport::get_environment();
 
-		// Local MT sandboxes: {client}.d.mt.com
+		// Local MT sandboxes: {site}.d.mt.com
 		if ( preg_match( '/^([a-z0-9-]+)\.d\.mt\.com$/i', $host, $m ) ) {
 			$base = $m[1] . '-local';
 		} elseif ( preg_match( '/^([a-z0-9-]+)\.(dev|stg|staging)\./i', $host, $m ) ) {
 			$base = $m[1] . '-' . ( 'stg' === $m[2] || 'staging' === $m[2] ? 'staging' : 'dev' );
 		} else {
-			// Strip www / www2 so www.maptician.com → maptician, not www.
+			// Strip www / www2 so www.example.com → example, not www.
 			$host_brand = preg_replace( '/^www\d*\./i', '', $host );
 			if ( preg_match( '/^([a-z0-9-]+)\./i', $host_brand, $m ) ) {
 				$base = $m[1];
@@ -730,7 +730,7 @@ class Admin {
 					<textarea class="large-text mt-mcp-autosave"
 							  rows="6"
 							  data-key="agents_md"
-							  placeholder="# Propio&#10;- Prefer drafts&#10;- Main flexible layouts live on page…"><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_AGENTS_MD, '' ) ); ?></textarea>
+							  placeholder="# Site context&#10;- Prefer drafts&#10;- Main flexible layouts live on page…"><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_AGENTS_MD, '' ) ); ?></textarea>
 				</label>
 				<p class="mt-mcp-help">Truncated into initialize instructions; full via <code>get_site_docs</code> / <code>site://agents</code>. Complements Site Brief (Brief wins on conflict).</p>
 
