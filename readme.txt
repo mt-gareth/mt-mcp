@@ -85,7 +85,7 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 Bugfixes: media_alt_report dispatch, list_media URLs, CPT URL lookup, link/sitemap/health polish.
 
 = 1.3.17 =
-Per-grant connection labels (shared mt_admin + Claude no longer collide). Re-label rows once after update if needed.
+Per-grant connection labels (shared WP user + same app no longer collide). Re-label rows once after update if needed.
 
 = 1.3.16 =
 Plugin icon; WordPress 7.1 compatibility metadata.
