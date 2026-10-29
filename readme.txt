@@ -47,6 +47,10 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 
 == Changelog ==
 
+= 1.3.15 =
+* Plugins list Settings link → Overview
+* Friendlier OAuth grant client names (Claude CIMD → “Claude”; truncate long URLs)
+
 = 1.3.14 =
 * Security lock: OAuth refresh cannot escalate scopes; DCR redirect allowlist; audience enforced
 * High-risk + write gates on attachment dedupe; SSRF guards on sitemap/HTML fetch and webhooks
@@ -61,6 +65,9 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk second lock; menu:// and media://missing-alt resources; Doctor auth/WAF probe
 
 == Upgrade Notice ==
+
+= 1.3.15 =
+Settings link on Plugins screen; clearer OAuth grant client labels.
 
 = 1.3.14 =
 Security hardening. Re-authorize OAuth clients if DCR redirects were on arbitrary HTTPS hosts — add those hosts under Settings → DCR extra hosts.
