@@ -133,6 +133,8 @@ class McpAuth {
 			'prepare_media_upload'     => 'upload_files',
 			'import_redirects'         => 'manage_options',
 			'set_write_gates'          => 'manage_options',
+			'manage_connections'       => 'manage_options',
+			'review_draft'             => 'edit_posts',
 			'confirm_dangerous_op'     => 'edit_posts',
 			'find_replace'             => 'edit_posts',
 			'create_redirect'          => 'manage_options',

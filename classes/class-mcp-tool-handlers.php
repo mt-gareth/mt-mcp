@@ -255,10 +255,7 @@ class McpToolHandlers {
 
 	public function get_post( $args ) {
 		$post_id = McpSupport::resolve_post_id( $args );
-		$post    = get_post( $post_id );
-		if ( ! $post ) {
-			throw new \Exception( 'Post not found.' );
-		}
+		$post    = McpSupport::assert_can_read_post( $post_id );
 
 		$include = isset( $args['include'] ) && is_array( $args['include'] )
 			? $args['include']
@@ -424,6 +421,7 @@ class McpToolHandlers {
 
 	public function update_post( $args ) {
 		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_edit_post( $post_id );
 		$before  = $this->snapshot_for_diff( $post_id, $args );
 		$dry_run = ! empty( $args['dry_run'] );
 
@@ -534,10 +532,8 @@ class McpToolHandlers {
 
 	public function trash_post( $args ) {
 		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_delete_post( $post_id );
 		$post    = get_post( $post_id );
-		if ( ! $post ) {
-			throw new \Exception( 'Post not found.' );
-		}
 		if ( ! empty( $args['dry_run'] ) ) {
 			return array(
 				'dry_run' => true,
@@ -577,9 +573,9 @@ class McpToolHandlers {
 
 	public function duplicate_post( $args ) {
 		$source_id = McpSupport::resolve_post_id( $args );
-		$source    = get_post( $source_id );
-		if ( ! $source ) {
-			throw new \Exception( 'Source post not found.' );
+		$source    = McpSupport::assert_can_read_post( $source_id );
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			throw new \Exception( 'Current user cannot create posts.' );
 		}
 		$status = isset( $args['post_status'] ) ? sanitize_key( $args['post_status'] ) : 'draft';
 		$title  = isset( $args['post_title'] ) ? $args['post_title'] : $source->post_title . ' (Copy)';
@@ -1156,10 +1152,7 @@ class McpToolHandlers {
 		if ( ! $term_id ) {
 			throw new \Exception( 'Provide id (term_id).' );
 		}
-		$term = $tax ? get_term( $term_id, $tax ) : get_term( $term_id );
-		if ( ! $term || is_wp_error( $term ) ) {
-			throw new \Exception( 'Term not found.' );
-		}
+		$term = McpSupport::assert_can_edit_term( $term_id, $tax );
 		$tax = $term->taxonomy;
 		$update = array();
 		foreach ( array( 'name', 'slug', 'description', 'parent' ) as $field ) {
@@ -1207,10 +1200,7 @@ class McpToolHandlers {
 		if ( ! $term_id ) {
 			throw new \Exception( 'Provide id (term_id).' );
 		}
-		$term = $tax ? get_term( $term_id, $tax ) : get_term( $term_id );
-		if ( ! $term || is_wp_error( $term ) ) {
-			throw new \Exception( 'Term not found.' );
-		}
+		$term = McpSupport::assert_can_edit_term( $term_id, $tax );
 		$tax = $term->taxonomy;
 		if ( ! empty( $args['dry_run'] ) ) {
 			return array(
@@ -3795,6 +3785,113 @@ MD;
 			),
 		);
 		return $report;
+	}
+
+
+	public function list_needs_review( $args = array() ) {
+		$limit = isset( $args['limit'] ) ? max( 1, min( 100, (int) $args['limit'] ) ) : 40;
+		$query = new \WP_Query(
+			array(
+				'post_type'      => 'any',
+				'post_status'    => array( 'draft', 'pending', 'private', 'future' ),
+				'posts_per_page' => $limit,
+				'meta_key'       => '_mt_mcp_needs_review',
+				'meta_value'     => '1',
+				'orderby'        => 'modified',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+			)
+		);
+		$items = array();
+		foreach ( $query->posts as $id ) {
+			$p = get_post( $id );
+			if ( ! $p ) {
+				continue;
+			}
+			$items[] = array(
+				'id'       => (int) $id,
+				'title'    => get_the_title( $p ),
+				'status'   => $p->post_status,
+				'type'     => $p->post_type,
+				'modified' => $p->post_modified,
+				'url'      => get_permalink( $p ),
+			);
+		}
+		return array(
+			'total' => (int) $query->found_posts,
+			'items' => $items,
+			'hint'  => 'Use review_draft with action publish|discard|keep, or create_draft_preview to share.',
+		);
+	}
+
+	public function review_draft( $args ) {
+		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_edit_post( $post_id );
+		$action = isset( $args['action'] ) ? sanitize_key( $args['action'] ) : '';
+		if ( ! in_array( $action, array( 'publish', 'discard', 'keep' ), true ) ) {
+			throw new \Exception( 'action must be publish, discard, or keep.' );
+		}
+		$post = get_post( $post_id );
+		if ( ! empty( $args['dry_run'] ) ) {
+			return array(
+				'dry_run' => true,
+				'id'      => $post_id,
+				'action'  => $action,
+				'status'  => $post->post_status,
+			);
+		}
+		if ( 'publish' === $action ) {
+			$r = wp_update_post( array( 'ID' => $post_id, 'post_status' => 'publish' ), true );
+			if ( is_wp_error( $r ) ) {
+				throw new \Exception( $r->get_error_message() );
+			}
+			delete_post_meta( $post_id, '_mt_mcp_needs_review' );
+			return array( 'id' => $post_id, 'action' => 'publish', 'status' => 'publish' );
+		}
+		if ( 'discard' === $action ) {
+			McpSupport::assert_can_delete_post( $post_id );
+			wp_trash_post( $post_id );
+			delete_post_meta( $post_id, '_mt_mcp_needs_review' );
+			return array( 'id' => $post_id, 'action' => 'discard', 'trashed' => true );
+		}
+		delete_post_meta( $post_id, '_mt_mcp_needs_review' );
+		return array( 'id' => $post_id, 'action' => 'keep', 'status' => $post->post_status, 'needs_review' => false );
+	}
+
+	public function manage_connections( $args ) {
+		$action = isset( $args['action'] ) ? sanitize_key( $args['action'] ) : 'list';
+		$connections = McpSupport::get_connections();
+		if ( 'list' === $action ) {
+			return array( 'connections' => array_values( $connections ) );
+		}
+		if ( 'upsert' === $action ) {
+			$name = isset( $args['name'] ) ? sanitize_title( $args['name'] ) : '';
+			$url  = isset( $args['url'] ) ? esc_url_raw( $args['url'] ) : '';
+			$env  = isset( $args['environment'] ) ? sanitize_key( $args['environment'] ) : 'staging';
+			if ( ! $name || ! $url ) {
+				throw new \Exception( 'Provide name and url.' );
+			}
+			$connections[ $name ] = array(
+				'name'        => $name,
+				'label'       => isset( $args['label'] ) ? sanitize_text_field( $args['label'] ) : $name,
+				'url'         => untrailingslashit( $url ),
+				'mcp_url'     => isset( $args['mcp_url'] ) ? esc_url_raw( $args['mcp_url'] ) : untrailingslashit( $url ) . '/mt-mcp',
+				'environment' => $env,
+				'notes'       => isset( $args['notes'] ) ? sanitize_text_field( $args['notes'] ) : '',
+			);
+			McpSupport::save_connections( $connections );
+			return array( 'saved' => $connections[ $name ], 'connections' => array_values( $connections ) );
+		}
+		if ( 'delete' === $action ) {
+			$name = isset( $args['name'] ) ? sanitize_title( $args['name'] ) : '';
+			if ( ! $name || ! isset( $connections[ $name ] ) ) {
+				throw new \Exception( 'Unknown connection name.' );
+			}
+			unset( $connections[ $name ] );
+			McpSupport::save_connections( $connections );
+			return array( 'deleted' => $name, 'connections' => array_values( $connections ) );
+		}
+		throw new \Exception( 'action must be list, upsert, or delete.' );
 	}
 
 }

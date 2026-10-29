@@ -43,6 +43,12 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 - [x] Pause writes, force draft, Site Brief (admin + `set_write_gates`)
 - [x] `connection_doctor` with redacted paste-for-support
 
+### Shipped in 1.3.1
+
+- [x] Object-level caps, op receipts, identifier-only audit, privacy copy
+- [x] OAuth refresh reuse + audience binding; DCR extra hosts
+- [x] Needs-review inbox + `manage_connections` presets
+
 ---
 
 ## Capability map (what works today)
@@ -119,32 +125,32 @@ Unblocks daily MT work or closes a production foot-gun. Build these first.
 - [x] **`media_alt_report`** — counts + IDs feeding `bulk_fix_media_alt`
 - [x] **Bulk redirect import** — `import_redirects` items[] or csv + state_token
 - [x] **Two-phase dangerous ops** — `state_token` on force-delete + redirect import; `confirm_dangerous_op`
-- [ ] **Named staging↔prod connections** / push presets
+- [x] **Named staging↔prod connections** — `manage_connections` list/upsert/delete presets
 
 ### Production safety (we work on live client sites)
 
 - [x] **Connection Doctor** — `connection_doctor` (HTTPS, `.well-known`, MCP/REST, WAF hints, paste_for_support)
 - [x] **`Cache-Control: no-store`** on MCP HTTP + OAuth JSON responses
 - [x] **JSON response guard** — discard stray PHP notices before MCP JSON body
-- [ ] **Object-level caps audit** — `edit_post` / `read_post` on target IDs everywhere
+- [x] **Object-level caps** — `edit_post` / `read_post` / `delete_post` (+ term caps) on target IDs
 - [x] **Protected-option denylist** — never write `siteurl`, `active_plugins`, salts, etc.
-- [x] **Force draft on create** — `set_write_gates` / Settings; marks `_mt_mcp_needs_review` (inbox UI still open)
+- [x] **Force draft on create** — `set_write_gates` / Settings; `_mt_mcp_needs_review` + Overview inbox + `list_needs_review` / `review_draft`
 - [x] **Pause writes** — site-wide freeze via `set_write_gates` / Settings; reads still work
-- [ ] **Op receipts / idempotent `operation_id`** — reconnects don’t double-write
+- [x] **Op receipts / idempotent `operation_id`** — write tools store/replay receipts on reconnect
 - [ ] **Per-change undo** + Changes admin UI (before / written / now); restore must keep MCP OAuth working
 - [x] **Safe mode** — force-delete + bulk redirects require `state_token` / `confirm`
 - [ ] **Three-gate dispatch** — tool allowlist ∩ read/write ceiling ∩ `current_user_can`; server inert until Enable
-- [ ] **Privacy copy** — tool results still go to the model provider; “no relay” ≠ “nothing leaves”
+- [x] **Privacy copy** — initialize instructions spell out model-provider exposure
 - [x] **Site Brief** — owner rules in Settings + `initialize` instructions + `get_site_context`
-- [ ] **Identifier-only audit** — ids/keys/slugs/status; no bodies/emails in log rows
-- [ ] **Revoke / uninstall hygiene** — document cutting OAuth + App Passwords; uninstall must not leave agent users
+- [x] **Identifier-only audit** — ids/keys/slugs/status; bodies/emails redacted in log rows
+- [x] **Revoke / uninstall hygiene** — Overview copy: revoke OAuth + remove App Passwords (uninstall ≠ revoke)
 
 ### Connect / OAuth hardening (cheap, high leverage)
 
 - [x] **MCP tool annotations** — `readOnlyHint` / `destructiveHint` / `idempotentHint` (incl. new destructive menu/term deletes)
 - [x] **Arg aliases** — `id` / `post_id` / `page_id` / `attachment_id` normalized on every tool call
-- [ ] **OAuth refresh reuse detection + audience binding**
-- [ ] **DCR redirect / additional-hosts allowlist**
+- [x] **OAuth refresh reuse detection + audience binding** — reuse revokes family; resource must match grant
+- [x] **DCR redirect / additional-hosts allowlist** — Settings `dcr_extra_hosts`
 - [x] **Site Health: `.well-known` must be 200** — checked by `connection_doctor`
 - [x] **Secret redaction** on doctor / health diagnostic payloads
 

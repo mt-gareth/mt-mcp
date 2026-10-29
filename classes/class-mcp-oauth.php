@@ -542,7 +542,7 @@ class McpOAuth {
 	private function refresh_token( $params ) {
 		$refresh   = isset( $params['refresh_token'] ) ? $params['refresh_token'] : '';
 		$client_id = isset( $params['client_id'] ) ? $this->sanitize_client_id( $params['client_id'] ) : '';
-		$resource  = isset( $params['resource'] ) ? $params['resource'] : home_url( '/mt-mcp' );
+		$resource  = isset( $params['resource'] ) ? $params['resource'] : '';
 
 		$client = $this->resolve_client( $client_id );
 		if ( ! $client || ! $this->verify_client_secret( $client, $params ) ) {
@@ -553,6 +553,13 @@ class McpOAuth {
 		$hash = hash( 'sha256', $refresh );
 		$row  = McpTokenStore::get_token( $hash );
 		if ( ! $row || empty( $row['is_refresh'] ) ) {
+			// Reuse detection: previously rotated refresh presented again → revoke family.
+			$reuse = get_transient( 'mt_mcp_rt_used_' . $hash );
+			if ( is_array( $reuse ) && ! empty( $reuse['user_id'] ) && ! empty( $reuse['client_id'] ) ) {
+				McpTokenStore::revoke_all_for_user( (int) $reuse['user_id'] );
+				$this->json_error( 'invalid_grant', 'Refresh token reuse detected; all tokens for this user were revoked.', 401 );
+				return;
+			}
 			$this->json_error( 'invalid_grant', 'Refresh token invalid.' );
 			return;
 		}
@@ -562,11 +569,28 @@ class McpOAuth {
 			return;
 		}
 
-		// Rotate refresh token.
+		// Audience binding: refresh resource must match the grant (when provided).
+		$bound = isset( $row['resource'] ) ? $row['resource'] : home_url( '/mt-mcp' );
+		if ( $resource && ! $this->resources_match( $resource, $bound ) ) {
+			$this->json_error( 'invalid_target', 'resource does not match the refresh token audience.', 401 );
+			return;
+		}
+		$resource = $resource ? $resource : $bound;
+
+		// Rotate: mark old hash as used for reuse detection, then delete.
+		set_transient(
+			'mt_mcp_rt_used_' . $hash,
+			array(
+				'user_id'   => (int) $row['user_id'],
+				'client_id' => $client_id,
+				'exp'       => time() + DAY_IN_SECONDS,
+			),
+			DAY_IN_SECONDS
+		);
 		McpTokenStore::delete_token( $hash );
 
 		$scope = isset( $params['scope'] ) && $params['scope'] ? $params['scope'] : $row['scope'];
-		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $scope, $resource ?: $row['resource'] ) );
+		$this->json( $this->issue_tokens( $row['user_id'], $client_id, $scope, $resource ) );
 	}
 
 	private function issue_tokens( $user_id, $client_id, $scope, $resource ) {
@@ -627,12 +651,28 @@ class McpOAuth {
 		$scopes = explode( ' ', (string) $row['scope'] );
 		$scope  = in_array( McpAuth::SCOPE_WRITE, $scopes, true ) ? 'write' : 'read';
 
+		// Soft audience hint for callers (MCP resource URL).
+		$expected = home_url( '/mt-mcp' );
+		$bound    = isset( $row['resource'] ) ? $row['resource'] : $expected;
+		$audience_ok = self::static_resources_match( $bound, $expected );
+
 		return array(
-			'ok'      => true,
-			'scope'   => $scope,
-			'user_id' => (int) $row['user_id'],
-			'method'  => 'oauth',
+			'ok'          => true,
+			'scope'       => $scope,
+			'user_id'     => (int) $row['user_id'],
+			'method'      => 'oauth',
+			'resource'    => $bound,
+			'audience_ok' => $audience_ok,
 		);
+	}
+
+	/**
+	 * Static wrapper so validate_access_token can compare resources without an instance.
+	 */
+	public static function static_resources_match( $a, $b ) {
+		$na = untrailingslashit( strtolower( (string) $a ) );
+		$nb = untrailingslashit( strtolower( (string) $b ) );
+		return $na === $nb || false !== strpos( $na, $nb ) || false !== strpos( $nb, $na );
 	}
 
 	private function handle_revoke() {
@@ -843,6 +883,10 @@ class McpOAuth {
 			return true;
 		}
 		if ( 'http' === $scheme && in_array( $host, array( 'localhost', '127.0.0.1', '[::1]' ), true ) ) {
+			return true;
+		}
+		// Allowlisted extra hosts (Settings / mt_mcp_dcr_extra_hosts) for http staging tunnels etc.
+		if ( in_array( $host, McpSupport::dcr_extra_hosts(), true ) ) {
 			return true;
 		}
 		// Cursor / Claude Desktop custom schemes sometimes appear; allow non-http only if clearly app-like.

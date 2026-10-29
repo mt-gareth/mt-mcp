@@ -18,6 +18,9 @@ class McpSupport {
 	const OPTION_PAUSE_WRITES = 'mt_mcp_pause_writes';
 	const OPTION_FORCE_DRAFT  = 'mt_mcp_force_draft';
 	const OPTION_SITE_BRIEF   = 'mt_mcp_site_brief';
+	const OPTION_CONNECTIONS = 'mt_mcp_connections';
+	const OPTION_DCR_HOSTS   = 'mt_mcp_dcr_extra_hosts';
+	const OPTION_OP_RECEIPTS = 'mt_mcp_op_receipts';
 	const AUDIT_MAX_ENTRIES   = 200;
 	const RATE_LIMIT_PER_MIN  = 120;
 	const AUDIT_HMAC_OPTION   = 'mt_mcp_audit_hmac_key';
@@ -70,6 +73,8 @@ class McpSupport {
 		'prepare_media_upload',
 		'import_redirects',
 		'set_write_gates',
+		'manage_connections',
+		'review_draft',
 		'confirm_dangerous_op',
 		'create_redirect',
 		'update_redirect',
@@ -190,6 +195,9 @@ class McpSupport {
 			'find_replace'           => 'content',
 			'get_site_health'        => 'system',
 			'connection_doctor'      => 'system',
+			'manage_connections'     => 'system',
+			'list_needs_review'      => 'content',
+			'review_draft'           => 'content',
 			'set_write_gates'        => 'system',
 			'confirm_dangerous_op'   => 'system',
 			'generate_cursor_skill'  => 'system',
@@ -382,14 +390,40 @@ class McpSupport {
 		if ( ! is_array( $args ) ) {
 			return array();
 		}
+		// Identifier-only audit: ids/keys/slugs/status/counts — never bodies, emails, or field values.
+		$allow = array(
+			'id', 'ids', 'post_id', 'page_id', 'term_id', 'revision_id', 'menu_id', 'attachment_id', 'media_id',
+			'post_type', 'taxonomy', 'status', 'post_status', 'slug', 'name', 'location', 'from', 'code',
+			'dry_run', 'apply', 'force_delete', 'confirm', 'operation', 'operation_id', 'state_token',
+			'limit', 'page', 'per_page', 'mime_type', 'provider', 'mode', 'action', 'scopes', 'expected_count',
+			'include_acf', 'include_taxonomies', 'include_featured', 'include_meta', 'ttl', 'max_bytes',
+			'pause_writes', 'force_draft', 'allow_non_draft', 'parent', 'parent_post_id', 'group_id',
+		);
 		$out = array();
 		foreach ( $args as $k => $v ) {
-			if ( in_array( $k, array( 'content', 'post_content', 'acf', 'core' ), true ) ) {
-				$out[ $k ] = is_string( $v ) ? ('[string ' . strlen( $v ) . ' chars]') : '[complex]';
-			} elseif ( is_scalar( $v ) ) {
+			$lk = strtolower( (string) $k );
+			if ( preg_match( '/(email|content|password|secret|token|body|acf|yoast|meta|fields|options|items|csv|data_base64|package|core|title|description|alt|url|find|replace|site_brief)/i', $lk )
+				&& ! in_array( $lk, array( 'post_id', 'operation_id', 'state_token', 'dry_run', 'force_delete', 'parent_post_id', 'attachment_id', 'media_id', 'revision_id', 'menu_id', 'term_id', 'page_id', 'group_id', 'expected_count', 'max_bytes' ), true )
+			) {
+				if ( is_array( $v ) ) {
+					$out[ $k ] = '[array:' . count( $v ) . ']';
+				} elseif ( is_string( $v ) ) {
+					$out[ $k ] = '[string ' . strlen( $v ) . ' chars]';
+				} else {
+					$out[ $k ] = '[redacted]';
+				}
+				continue;
+			}
+			if ( in_array( $lk, $allow, true ) || preg_match( '/(_id|ids)$/', $lk ) ) {
+				if ( is_scalar( $v ) || null === $v ) {
+					$out[ $k ] = $v;
+				} elseif ( is_array( $v ) && $v && array_keys( $v ) === range( 0, count( $v ) - 1 ) && is_scalar( $v[0] ) ) {
+					$out[ $k ] = array_slice( $v, 0, 20 );
+				} else {
+					$out[ $k ] = is_array( $v ) ? ( '[array:' . count( $v ) . ']' ) : gettype( $v );
+				}
+			} elseif ( is_bool( $v ) || is_numeric( $v ) ) {
 				$out[ $k ] = $v;
-			} else {
-				$out[ $k ] = is_array( $v ) ? ( '[array:' . count( $v ) . ']' ) : gettype( $v );
 			}
 		}
 		return $out;
@@ -688,6 +722,113 @@ class McpSupport {
 			$value = preg_replace( '/(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*\S+/', '$1=[redacted]', $value );
 		}
 		return $value;
+	}
+
+
+	public static function assert_can_edit_post( $post_id ) {
+		$post_id = (int) $post_id;
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			throw new \Exception( 'Post not found.' );
+		}
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			throw new \Exception( 'Current user cannot edit_post on id ' . $post_id . '.' );
+		}
+		return $post;
+	}
+
+	public static function assert_can_read_post( $post_id ) {
+		$post_id = (int) $post_id;
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			throw new \Exception( 'Post not found.' );
+		}
+		// Public published content is readable without caps.
+		if ( 'publish' === $post->post_status && empty( $post->post_password ) ) {
+			return $post;
+		}
+		if ( ! current_user_can( 'read_post', $post_id ) ) {
+			throw new \Exception( 'Current user cannot read_post on id ' . $post_id . '.' );
+		}
+		return $post;
+	}
+
+	public static function assert_can_delete_post( $post_id ) {
+		$post_id = (int) $post_id;
+		if ( ! get_post( $post_id ) ) {
+			throw new \Exception( 'Post not found.' );
+		}
+		if ( ! current_user_can( 'delete_post', $post_id ) ) {
+			throw new \Exception( 'Current user cannot delete_post on id ' . $post_id . '.' );
+		}
+	}
+
+	public static function assert_can_edit_term( $term_id, $taxonomy = '' ) {
+		$term = $taxonomy ? get_term( (int) $term_id, $taxonomy ) : get_term( (int) $term_id );
+		if ( ! $term || is_wp_error( $term ) ) {
+			throw new \Exception( 'Term not found.' );
+		}
+		$tax = get_taxonomy( $term->taxonomy );
+		$cap = ( $tax && ! empty( $tax->cap->edit_terms ) ) ? $tax->cap->edit_terms : 'manage_categories';
+		if ( ! current_user_can( $cap ) ) {
+			throw new \Exception( 'Current user lacks taxonomy capability "' . $cap . '".' );
+		}
+		return $term;
+	}
+
+	public static function get_op_receipt( $operation_id ) {
+		$operation_id = sanitize_text_field( (string) $operation_id );
+		if ( '' === $operation_id ) {
+			return null;
+		}
+		$all = get_option( self::OPTION_OP_RECEIPTS, array() );
+		if ( ! is_array( $all ) || empty( $all[ $operation_id ] ) ) {
+			return null;
+		}
+		return $all[ $operation_id ];
+	}
+
+	public static function store_op_receipt( $operation_id, $tool, $result ) {
+		$operation_id = sanitize_text_field( (string) $operation_id );
+		if ( '' === $operation_id ) {
+			return;
+		}
+		$all = get_option( self::OPTION_OP_RECEIPTS, array() );
+		if ( ! is_array( $all ) ) {
+			$all = array();
+		}
+		$all[ $operation_id ] = array(
+			'operation_id' => $operation_id,
+			'tool'         => $tool,
+			'ts'           => gmdate( 'c' ),
+			'user_id'      => get_current_user_id(),
+			'result'       => $result,
+		);
+		// Cap ring buffer.
+		if ( count( $all ) > 100 ) {
+			$all = array_slice( $all, -100, null, true );
+		}
+		update_option( self::OPTION_OP_RECEIPTS, $all, false );
+	}
+
+	public static function get_connections() {
+		$stored = get_option( self::OPTION_CONNECTIONS, array() );
+		return is_array( $stored ) ? $stored : array();
+	}
+
+	public static function save_connections( $connections ) {
+		update_option( self::OPTION_CONNECTIONS, is_array( $connections ) ? $connections : array(), false );
+	}
+
+	public static function dcr_extra_hosts() {
+		$raw = (string) get_option( self::OPTION_DCR_HOSTS, '' );
+		$hosts = array_filter( array_map( 'strtolower', array_map( 'trim', preg_split( '/[\s,]+/', $raw ) ) ) );
+		/**
+		 * Filter additional hosts allowed for DCR redirect_uris (beyond https / localhost).
+		 *
+		 * @param string[] $hosts
+		 */
+		return apply_filters( 'mt_mcp_dcr_extra_hosts', array_values( $hosts ) );
 	}
 
 	public static function redirects_backend() {

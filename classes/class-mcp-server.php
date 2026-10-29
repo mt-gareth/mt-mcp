@@ -446,7 +446,9 @@ Staging → live page moves: export_post on source (embed_media if target cannot
 
 Writes are currently {$writes}. Use get_site_health for install health; list_revisions / restore_revision after bad edits.
 
-{$brief_block}Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep) for common review workflows.
+{$brief_block}Privacy note: tool results are sent to the model provider (Cursor/Claude/etc.). "No cloud relay" means auth stays on this WordPress site — it does NOT mean content never leaves the machine.
+
+Use prompts (seo_pass, content_inventory, acf_gap_check, launch_prep) for common review workflows.
 Use resources site://context, site://sitemap, and acf://schema/{post_type} for quick context pulls.
 TXT;
 	}
@@ -475,6 +477,14 @@ TXT;
 				'name'        => 'connection_doctor',
 				'description' => 'Diagnose MCP connectivity: HTTPS, .well-known discovery (must be 200 not 301), MCP endpoint, REST health, write gates, WAF hints. Returns paste_for_support (secrets redacted).',
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
+			),
+			array(
+				'name'        => 'list_needs_review',
+				'description' => 'List posts marked _mt_mcp_needs_review (force-draft inbox).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array( 'limit' => array( 'type' => 'integer' ) ),
+				),
 			),
 			array(
 				'name'        => 'acf_media_audit',
@@ -1051,6 +1061,37 @@ TXT;
 			),
 
 			array(
+				'name'        => 'review_draft',
+				'description' => 'Resolve a needs-review draft: action publish|discard|keep. Supports dry_run. Pass operation_id for idempotent writes.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'           => array( 'type' => 'integer' ),
+						'post_id'      => array( 'type' => 'integer' ),
+						'action'       => array( 'type' => 'string' ),
+						'dry_run'      => array( 'type' => 'boolean' ),
+						'operation_id' => array( 'type' => 'string' ),
+					),
+					'required'   => array( 'action' ),
+				),
+			),
+			array(
+				'name'        => 'manage_connections',
+				'description' => 'Named staging↔prod MCP connections/presets. action: list|upsert|delete. upsert needs name+url (+ environment, mcp_url, label, notes).',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'action'      => array( 'type' => 'string' ),
+						'name'        => array( 'type' => 'string' ),
+						'label'       => array( 'type' => 'string' ),
+						'url'         => array( 'type' => 'string' ),
+						'mcp_url'     => array( 'type' => 'string' ),
+						'environment' => array( 'type' => 'string' ),
+						'notes'       => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'create_draft_preview',
 				'description' => 'Create a signed public draft preview URL (no WP login). Optional ttl seconds. Supports dry_run.',
 				'inputSchema' => array(
@@ -1378,11 +1419,36 @@ TXT;
 			return $this->tool_error( "Unknown tool: $name" );
 		}
 
+		// Idempotent write receipts: reconnects with the same operation_id replay the stored result.
+		$operation_id = isset( $args['operation_id'] ) ? sanitize_text_field( (string) $args['operation_id'] ) : '';
+		if ( $operation_id && McpSupport::is_write_tool( $name ) && empty( $args['dry_run'] ) ) {
+			$existing = McpSupport::get_op_receipt( $operation_id );
+			if ( is_array( $existing ) && isset( $existing['result'] ) ) {
+				$replay = $existing['result'];
+				if ( is_array( $replay ) ) {
+					$replay['operation_id'] = $operation_id;
+					$replay['receipt_replay'] = true;
+				}
+				McpSupport::audit( $name, McpSupport::summarize_args( $args ), true, 'receipt_replay' );
+				$structured = $this->as_structured_object( $replay );
+				return array(
+					'content'           => array( array( 'type' => 'text', 'text' => wp_json_encode( $structured ) ) ),
+					'structuredContent' => $structured,
+					'isError'           => false,
+				);
+			}
+		}
+
 		try {
 			$data = call_user_func( array( $this->handlers, $method ), $args );
 		} catch ( \Throwable $e ) {
 			McpSupport::audit( $name, McpSupport::summarize_args( $args ), false, $e->getMessage() );
 			return $this->tool_error( $e->getMessage() );
+		}
+
+		if ( $operation_id && McpSupport::is_write_tool( $name ) && empty( $args['dry_run'] ) && is_array( $data ) ) {
+			$data['operation_id'] = $operation_id;
+			McpSupport::store_op_receipt( $operation_id, $name, $data );
 		}
 
 		McpSupport::audit( $name, McpSupport::summarize_args( $args ), true, McpSupport::is_write_tool( $name ) ? 'write' : 'read' );
@@ -1449,6 +1515,9 @@ TXT;
 			'set_write_gates'       => 'set_write_gates',
 			'confirm_dangerous_op'  => 'confirm_dangerous_op',
 			'connection_doctor'     => 'connection_doctor',
+			'manage_connections'    => 'manage_connections',
+			'list_needs_review'     => 'list_needs_review',
+			'review_draft'          => 'review_draft',
 			'preflight_publish'     => 'preflight_publish',
 			'list_acf_field_groups' => 'list_acf_field_groups',
 			'list_acf_options_pages'=> 'list_acf_options_pages',

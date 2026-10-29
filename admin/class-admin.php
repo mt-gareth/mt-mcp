@@ -99,6 +99,11 @@ class Admin {
 				update_option( McpSupport::OPTION_SITE_BRIEF, $val, false );
 				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
 
+			case 'dcr_extra_hosts':
+				$val = sanitize_text_field( (string) $raw );
+				update_option( McpSupport::OPTION_DCR_HOSTS, $val, false );
+				wp_send_json_success( array( 'key' => $key, 'value' => $val ) );
+
 			case 'environment':
 				if ( defined( 'MT_MCP_ENVIRONMENT' ) ) {
 					wp_send_json_error( array( 'message' => 'Environment is locked by wp-config.' ), 400 );
@@ -345,6 +350,48 @@ class Admin {
 			<?php else : ?>
 				<?php $this->render_grants_table( $grants ); ?>
 			<?php endif; ?>
+			<p class="mt-mcp-help">To cut off an agent: Revoke here, and remove Application Passwords under Users → Profile. Uninstalling the plugin does not revoke App Passwords.</p>
+		</section>
+
+		<?php
+		$review = new \WP_Query(
+			array(
+				'post_type'              => 'any',
+				'post_status'            => array( 'draft', 'pending', 'private', 'future' ),
+				'posts_per_page'         => 10,
+				'meta_key'               => '_mt_mcp_needs_review',
+				'meta_value'             => '1',
+				'orderby'                => 'modified',
+				'order'                  => 'DESC',
+				'no_found_rows'          => false,
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+			)
+		);
+		?>
+		<section class="mt-mcp-card">
+			<h2>Needs review</h2>
+			<p class="mt-mcp-help">Drafts created while Force draft is on. Agents can also call <code>list_needs_review</code> / <code>review_draft</code>.</p>
+			<?php if ( ! $review->have_posts() ) : ?>
+				<p class="mt-mcp-help">Inbox empty.</p>
+			<?php else : ?>
+				<ul class="mt-mcp-help">
+					<?php
+					while ( $review->have_posts() ) :
+						$review->the_post();
+						?>
+						<li>
+							<a href="<?php echo esc_url( get_edit_post_link() ); ?>"><?php the_title(); ?></a>
+							— <?php echo esc_html( get_post_status() ); ?>
+							· <a href="<?php echo esc_url( get_preview_post_link() ); ?>">Preview</a>
+						</li>
+					<?php endwhile; ?>
+					<?php wp_reset_postdata(); ?>
+				</ul>
+				<?php if ( $review->found_posts > 10 ) : ?>
+					<p class="mt-mcp-help"><?php echo esc_html( (string) ( $review->found_posts - 10 ) ); ?> more…</p>
+				<?php endif; ?>
+			<?php endif; ?>
 		</section>
 		<?php
 	}
@@ -490,6 +537,16 @@ class Admin {
 							  placeholder="e.g. Never publish without client approval. Keep phone number in Site Options."><?php echo esc_textarea( (string) get_option( McpSupport::OPTION_SITE_BRIEF, '' ) ); ?></textarea>
 				</label>
 				<p class="mt-mcp-help">Injected into MCP initialize instructions. Max 2000 characters.</p>
+
+				<label class="mt-mcp-field">
+					<span>DCR extra redirect hosts</span>
+					<input type="text"
+						   class="regular-text mt-mcp-autosave"
+						   data-key="dcr_extra_hosts"
+						   value="<?php echo esc_attr( (string) get_option( McpSupport::OPTION_DCR_HOSTS, '' ) ); ?>"
+						   placeholder="tunnel.example.com, staging.local" />
+				</label>
+				<p class="mt-mcp-help">Comma-separated hosts allowed for OAuth Dynamic Client Registration redirect URIs beyond https / localhost.</p>
 
 				<label class="mt-mcp-field">
 					<span>Write-batch webhook URL (optional)</span>
