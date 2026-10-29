@@ -293,7 +293,7 @@ class Admin {
 	}
 
 	private function mcp_url() {
-		return untrailingslashit( home_url( '/mt-mcp' ) );
+		return McpSupport::mcp_resource_url();
 	}
 
 	private function oauth_config_json() {

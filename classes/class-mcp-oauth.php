@@ -172,10 +172,10 @@ class McpOAuth {
 	 * ---------------------------------------------------------------------- */
 
 	public function protected_resource_metadata() {
-		$resource = home_url( '/mt-mcp' );
+		$resource = McpSupport::mcp_resource_url();
 		return array(
 			'resource'                 => $resource,
-			'authorization_servers'    => array( home_url( '/' ) ),
+			'authorization_servers'    => array( untrailingslashit( McpSupport::public_url( '/' ) ) ),
 			'bearer_methods_supported' => array( 'header' ),
 			'scopes_supported'         => array( McpAuth::SCOPE_READ, McpAuth::SCOPE_WRITE ),
 			'resource_documentation'   => admin_url( 'options-general.php?page=mt-mcp' ),
@@ -190,12 +190,12 @@ class McpOAuth {
 		// Claude prefers CIMD when client_id_metadata_document_supported is true.
 		// (Earlier we hid DCR while WPE blocked python-httpx; that edge case is fixed per-site.)
 		$meta = array(
-			'issuer'                            => home_url( '/' ),
+			'issuer'                            => untrailingslashit( McpSupport::public_url( '/' ) ),
 			// Prefer root /authorize — Claude navigates here even when metadata
 			// advertises /mt-mcp/oauth/authorize. Both paths are handled.
-			'authorization_endpoint'            => home_url( '/authorize' ),
-			'token_endpoint'                    => rest_url( 'mt-mcp/v1/oauth/token' ),
-			'revocation_endpoint'               => rest_url( 'mt-mcp/v1/oauth/revoke' ),
+			'authorization_endpoint'            => McpSupport::public_url( '/authorize' ),
+			'token_endpoint'                    => McpSupport::publicize_url( rest_url( 'mt-mcp/v1/oauth/token' ) ),
+			'revocation_endpoint'               => McpSupport::publicize_url( rest_url( 'mt-mcp/v1/oauth/revoke' ) ),
 			'response_types_supported'          => array( 'code' ),
 			'grant_types_supported'             => array( 'authorization_code', 'refresh_token' ),
 			'code_challenge_methods_supported'  => array( 'S256' ),
@@ -212,7 +212,7 @@ class McpOAuth {
 		 * @param bool $advertise Default true.
 		 */
 		if ( apply_filters( 'mt_mcp_advertise_registration_endpoint', true ) ) {
-			$meta['registration_endpoint'] = rest_url( 'mt-mcp/v1/oauth/register' );
+			$meta['registration_endpoint'] = McpSupport::publicize_url( rest_url( 'mt-mcp/v1/oauth/register' ) );
 		}
 
 		return $meta;
@@ -301,7 +301,7 @@ class McpOAuth {
 		$code_challenge        = isset( $params['code_challenge'] ) ? sanitize_text_field( $params['code_challenge'] ) : '';
 		$code_challenge_method = isset( $params['code_challenge_method'] ) ? sanitize_text_field( $params['code_challenge_method'] ) : '';
 		$scope                 = isset( $params['scope'] ) ? sanitize_text_field( $params['scope'] ) : ( McpAuth::SCOPE_READ . ' ' . McpAuth::SCOPE_WRITE );
-		$resource              = isset( $params['resource'] ) ? esc_url_raw( $params['resource'] ) : home_url( '/mt-mcp' );
+		$resource              = isset( $params['resource'] ) ? esc_url_raw( $params['resource'] ) : McpSupport::mcp_resource_url();
 
 		$client = $this->resolve_client( $client_id );
 		if ( ! $client ) {
@@ -500,7 +500,7 @@ class McpOAuth {
 		$redirect_uri  = isset( $params['redirect_uri'] ) ? $params['redirect_uri'] : '';
 		$client_id     = isset( $params['client_id'] ) ? $this->sanitize_client_id( $params['client_id'] ) : '';
 		$code_verifier = isset( $params['code_verifier'] ) ? $params['code_verifier'] : '';
-		$resource      = isset( $params['resource'] ) ? $params['resource'] : home_url( '/mt-mcp' );
+		$resource      = isset( $params['resource'] ) ? $params['resource'] : McpSupport::mcp_resource_url();
 
 		$client = $this->resolve_client( $client_id );
 		if ( ! $client || ! $this->verify_client_secret( $client, $params ) ) {
@@ -570,7 +570,7 @@ class McpOAuth {
 		}
 
 		// Audience binding: refresh resource must match the grant (when provided).
-		$bound = isset( $row['resource'] ) ? $row['resource'] : home_url( '/mt-mcp' );
+		$bound = isset( $row['resource'] ) ? $row['resource'] : McpSupport::mcp_resource_url();
 		if ( $resource && ! $this->resources_match( $resource, $bound ) ) {
 			$this->json_error( 'invalid_target', 'resource does not match the refresh token audience.', 401 );
 			return;
@@ -652,7 +652,7 @@ class McpOAuth {
 		$scope  = in_array( McpAuth::SCOPE_WRITE, $scopes, true ) ? 'write' : 'read';
 
 		// Soft audience hint for callers (MCP resource URL).
-		$expected = home_url( '/mt-mcp' );
+		$expected = McpSupport::mcp_resource_url();
 		$bound    = isset( $row['resource'] ) ? $row['resource'] : $expected;
 		$audience_ok = self::static_resources_match( $bound, $expected );
 

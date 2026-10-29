@@ -179,6 +179,7 @@ class McpSupport {
 			'upload_media'           => 'media',
 			'bulk_fix_media_alt'    => 'media',
 			'media_alt_report'       => 'media',
+			'unused_media_report'    => 'media',
 			'prepare_media_upload'   => 'media',
 			'replace_attachment_file'=> 'media',
 			'acf_media_audit'        => 'media',
@@ -243,6 +244,65 @@ class McpSupport {
 			$env = strtolower( (string) get_option( self::OPTION_ENVIRONMENT, 'unknown' ) );
 		}
 		return isset( self::ENVIRONMENTS[ $env ] ) ? $env : 'unknown';
+	}
+
+	/**
+	 * Public base URL for OAuth/MCP discovery ads (tunnel-friendly).
+	 * Define MT_MCP_PUBLIC_BASE in wp-config (e.g. https://abc.ngrok.io) when
+	 * home_url() is not reachable by Cursor/Claude.
+	 *
+	 * @param string $path Optional path beginning with /.
+	 * @return string
+	 */
+	public static function public_url( $path = '/' ) {
+		$path = '/' . ltrim( (string) $path, '/' );
+		if ( '/' !== $path ) {
+			$path = untrailingslashit( $path );
+		}
+		$base = '';
+		if ( defined( 'MT_MCP_PUBLIC_BASE' ) && MT_MCP_PUBLIC_BASE ) {
+			$base = untrailingslashit( (string) MT_MCP_PUBLIC_BASE );
+		}
+		/**
+		 * Filter the advertised public base (no trailing slash).
+		 *
+		 * @param string $base Empty to use home_url.
+		 */
+		$base = apply_filters( 'mt_mcp_public_base', $base );
+		if ( $base ) {
+			return ( '/' === $path ) ? trailingslashit( $base ) : ( $base . $path );
+		}
+		return ( '/' === $path ) ? trailingslashit( home_url( '/' ) ) : home_url( $path );
+	}
+
+	public static function mcp_resource_url() {
+		return untrailingslashit( self::public_url( '/mt-mcp' ) );
+	}
+
+	/**
+	 * Rewrite a home/rest URL onto MT_MCP_PUBLIC_BASE when defined.
+	 *
+	 * @param string $url Absolute URL.
+	 * @return string
+	 */
+	public static function publicize_url( $url ) {
+		$url = (string) $url;
+		if ( ! $url ) {
+			return $url;
+		}
+		$base = '';
+		if ( defined( 'MT_MCP_PUBLIC_BASE' ) && MT_MCP_PUBLIC_BASE ) {
+			$base = untrailingslashit( (string) MT_MCP_PUBLIC_BASE );
+		}
+		$base = apply_filters( 'mt_mcp_public_base', $base );
+		if ( ! $base ) {
+			return $url;
+		}
+		$home = untrailingslashit( home_url( '/' ) );
+		if ( 0 === strpos( $url, $home ) ) {
+			return $base . substr( $url, strlen( $home ) );
+		}
+		return $url;
 	}
 
 	public static function tool_allowed( $tool ) {

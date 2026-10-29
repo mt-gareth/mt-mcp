@@ -59,6 +59,10 @@ Goal: an agent should be able to **inventory, build, and update** a typical MT c
 - [x] `list_theme_templates`, `plugin_capability_matrix`, `diff_public_html`, `check_links`, `replace_attachment_file`
 - [x] `bulk_update_posts` (status/author/parent) + safe `list_users`
 
+### Shipped in 1.3.5
+
+- [x] `unused_media_report` + `MT_MCP_PUBLIC_BASE` / `mt_mcp_public_base` for tunnel OAuth ads
+
 ---
 
 ## Capability map (what works today)
@@ -175,7 +179,7 @@ Makes sessions smoother or safer; not daily blockers.
 - [x] **Public HTML verification** after content edits (`diff_public_html`)
 - [ ] **OG / Twitter / canonical / primary category / breadcrumb** SEO helpers
 - [ ] **Sitemap crawl with soft-404 body checks** (beyond HEAD)
-- [ ] **Unused media report**
+- [x] **Unused media report** — `unused_media_report`
 - [ ] **Media fingerprint** find-before-upload (extend SHA dedupe)
 - [ ] **SVG sanitize** on upload
 - [x] **Replace attachment file** (keep ID — preserves ACF image fields)
@@ -203,7 +207,7 @@ Makes sessions smoother or safer; not daily blockers.
 
 ### Ops & hosting
 
-- [ ] **`MT_MCP_PUBLIC_BASE`** for tunnel/local OAuth advertise URL
+- [x] **`MT_MCP_PUBLIC_BASE`** for tunnel/local OAuth advertise URL
 - [ ] **Alternate discovery URL** when hosts block `/.well-known/`
 - [ ] **Output / Auth-header / Sucuri diagnostics** folded into Doctor
 - [ ] **Pending OAuth client approval** queue (extra lock on prod Maptician-class sites)

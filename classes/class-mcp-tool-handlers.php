@@ -28,7 +28,8 @@ class McpToolHandlers {
 				'description' => get_bloginfo( 'description' ),
 				'url'         => home_url( '/' ),
 				'admin_url'   => admin_url(),
-				'mcp_url'     => home_url( '/mt-mcp' ),
+				'mcp_url'     => McpSupport::mcp_resource_url(),
+				'public_base' => defined( 'MT_MCP_PUBLIC_BASE' ) ? (string) MT_MCP_PUBLIC_BASE : '',
 				'rest_mcp_url'=> rest_url( 'mt-mcp/v1' ),
 				'timezone'    => wp_timezone_string(),
 				'language'    => get_locale(),
@@ -3673,8 +3674,8 @@ MD;
 
 	public function connection_doctor( $args = array() ) {
 		$checks = array();
-		$base   = home_url( '/' );
-		$mcp    = home_url( '/mt-mcp' );
+		$base   = untrailingslashit( McpSupport::public_url( '/' ) );
+		$mcp    = McpSupport::mcp_resource_url();
 		$rest   = rest_url( 'mt-mcp/v1' );
 		$ssl    = apply_filters( 'mt_mcp_sslverify', true, $base );
 
@@ -4548,6 +4549,103 @@ MD;
 	/**
 	 * Safe user list for author assignment (no emails by default).
 	 */
+	public function unused_media_report( $args = array() ) {
+		$limit = isset( $args['limit'] ) ? max( 1, min( 200, (int) $args['limit'] ) ) : 50;
+		$mime  = isset( $args['mime_type'] ) ? sanitize_text_field( $args['mime_type'] ) : '';
+		$q = array(
+			'post_type'      => 'attachment',
+			'post_status'    => 'inherit',
+			'posts_per_page' => min( 500, max( $limit * 3, 100 ) ),
+			'orderby'        => 'date',
+			'order'          => 'DESC',
+			'fields'         => 'ids',
+		);
+		if ( $mime ) {
+			$q['post_mime_type'] = $mime;
+		}
+		$ids = get_posts( $q );
+		$used = array();
+
+		// Featured images.
+		global $wpdb;
+		$featured = $wpdb->get_col( "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_thumbnail_id' AND meta_value != ''" );
+		foreach ( $featured as $fid ) {
+			$used[ (int) $fid ] = true;
+		}
+
+		// Content / excerpt URLs and ids in a sample of recent posts.
+		$posts = get_posts(
+			array(
+				'post_type'      => 'any',
+				'post_status'    => array( 'publish', 'draft', 'private', 'pending', 'future' ),
+				'posts_per_page' => 200,
+				'fields'         => 'ids',
+			)
+		);
+		$upload = wp_upload_dir();
+		$baseurl = trailingslashit( $upload['baseurl'] );
+		foreach ( $posts as $pid ) {
+			$p = get_post( $pid );
+			if ( ! $p ) {
+				continue;
+			}
+			$blob = $p->post_content . ' ' . $p->post_excerpt;
+			if ( function_exists( 'get_fields' ) ) {
+				$acf = get_fields( $pid );
+				if ( is_array( $acf ) ) {
+					$blob .= ' ' . wp_json_encode( $acf );
+				}
+			}
+			if ( preg_match_all( '/\b(\d{2,})\b/', $blob, $m ) ) {
+				foreach ( $m[1] as $maybe ) {
+					$maybe = (int) $maybe;
+					if ( $maybe && ( 'attachment' === get_post_type( $maybe ) ) ) {
+						$used[ $maybe ] = true;
+					}
+				}
+			}
+			if ( $baseurl && false !== strpos( $blob, $baseurl ) ) {
+				foreach ( $ids as $aid ) {
+					if ( isset( $used[ $aid ] ) ) {
+						continue;
+					}
+					$url = wp_get_attachment_url( $aid );
+					if ( $url && false !== strpos( $blob, $url ) ) {
+						$used[ $aid ] = true;
+					}
+				}
+			}
+		}
+
+		$unused = array();
+		foreach ( $ids as $aid ) {
+			$aid = (int) $aid;
+			if ( isset( $used[ $aid ] ) ) {
+				continue;
+			}
+			$att = get_post( $aid );
+			if ( ! $att ) {
+				continue;
+			}
+			$unused[] = array(
+				'id'        => $aid,
+				'title'     => $att->post_title,
+				'mime_type' => $att->post_mime_type,
+				'url'       => wp_get_attachment_url( $aid ),
+				'date'      => $att->post_date,
+			);
+			if ( count( $unused ) >= $limit ) {
+				break;
+			}
+		}
+		return array(
+			'scanned_attachments' => count( $ids ),
+			'unused_count'        => count( $unused ),
+			'items'               => $unused,
+			'hint'                => 'Heuristic: not featured, and ID/URL not found in a sample of 200 posts + ACF. Review before deleting.',
+		);
+	}
+
 	public function list_users( $args = array() ) {
 		if ( ! current_user_can( 'list_users' ) && ! current_user_can( 'edit_others_posts' ) ) {
 			throw new \Exception( 'list_users or edit_others_posts required.' );

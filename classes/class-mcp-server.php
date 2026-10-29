@@ -479,6 +479,17 @@ TXT;
 				'inputSchema' => array( 'type' => 'object', 'properties' => new \stdClass() ),
 			),
 			array(
+				'name'        => 'unused_media_report',
+				'description' => 'Heuristic report of attachments not referenced as featured image or in a sample of post content/ACF. Review before delete.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'limit'     => array( 'type' => 'integer' ),
+						'mime_type' => array( 'type' => 'string' ),
+					),
+				),
+			),
+			array(
 				'name'        => 'list_theme_templates',
 				'description' => 'List theme page templates (file => label) for page and hierarchical CPTs.',
 				'inputSchema' => array(
@@ -1659,6 +1670,7 @@ TXT;
 			'list_changes'          => 'list_changes',
 			'get_change'            => 'get_change',
 			'undo_change'           => 'undo_change',
+			'unused_media_report'   => 'unused_media_report',
 			'list_theme_templates'  => 'list_theme_templates',
 			'plugin_capability_matrix' => 'plugin_capability_matrix',
 			'diff_public_html'      => 'diff_public_html',
