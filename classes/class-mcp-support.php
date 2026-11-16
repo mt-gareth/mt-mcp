@@ -44,6 +44,7 @@ class McpSupport {
 	const UNDOABLE_TOOLS = array(
 		'create_post',
 		'update_post',
+		'update_acf_layout',
 		'trash_post',
 		'update_media',
 		'update_options_page',
@@ -77,6 +78,7 @@ class McpSupport {
 	const WRITE_TOOLS = array(
 		'create_post',
 		'update_post',
+		'update_acf_layout',
 		'trash_post',
 		'duplicate_post',
 		'create_term',
@@ -179,6 +181,7 @@ class McpSupport {
 			'get_post'               => 'content',
 			'create_post'            => 'content',
 			'update_post'            => 'content',
+			'update_acf_layout'      => 'acf',
 			'trash_post'             => 'content',
 			'list_revisions'         => 'content',
 			'get_revision'           => 'content',
@@ -191,6 +194,7 @@ class McpSupport {
 			'list_acf_field_groups'  => 'acf',
 			'list_acf_options_pages' => 'acf',
 			'get_acf_schema'         => 'acf',
+			'list_acf_layouts'       => 'acf',
 			'get_options_page'       => 'acf',
 			'update_options_page'    => 'acf',
 			'bulk_update_yoast'      => 'seo',
@@ -1722,18 +1726,32 @@ class McpSupport {
 					'label'  => isset( $args['post_title'] ) ? (string) $args['post_title'] : ( isset( $args['core']['post_title'] ) ? (string) $args['core']['post_title'] : 'new post' ),
 				);
 			case 'update_post':
+			case 'update_acf_layout':
 			case 'restore_revision':
+				if ( 'update_acf_layout' === $tool && isset( $args['op'] ) && 'get' === sanitize_key( (string) $args['op'] ) ) {
+					return null; // Read sub-op — no undo snapshot.
+				}
 				$id = self::resolve_post_id( $args );
 				if ( ! $id ) {
 					return null;
 				}
 				$snap = self::snapshot_post( $id );
-				return $snap ? array(
+				if ( ! $snap ) {
+					return null;
+				}
+				$label = isset( $snap['core']['post_title'] ) ? (string) $snap['core']['post_title'] : ( 'post #' . $id );
+				if ( 'update_acf_layout' === $tool && ! empty( $args['field'] ) ) {
+					$label .= ' / ' . sanitize_key( (string) $args['field'] );
+					if ( isset( $args['op'] ) ) {
+						$label .= ' [' . sanitize_key( (string) $args['op'] ) . ']';
+					}
+				}
+				return array(
 					'action' => 'update',
 					'before' => $snap,
-					'label'  => $snap['core']['post_title'],
+					'label'  => $label,
 					'object' => array( 'type' => 'post', 'id' => $id ),
-				) : null;
+				);
 			case 'trash_post':
 				if ( ! empty( $args['force_delete'] ) ) {
 					return null; // Permanent delete is not undoable.
@@ -1819,7 +1837,7 @@ class McpSupport {
 			$written = self::snapshot_post( (int) $result['id'] );
 			$object  = array( 'type' => 'post', 'id' => (int) $result['id'] );
 			$action  = 'create';
-		} elseif ( 'update_post' === $tool || 'restore_revision' === $tool ) {
+		} elseif ( in_array( $tool, array( 'update_post', 'update_acf_layout', 'restore_revision' ), true ) ) {
 			$id      = ! empty( $result['id'] ) ? (int) $result['id'] : ( isset( $object['id'] ) ? (int) $object['id'] : 0 );
 			$written = $id ? self::snapshot_post( $id ) : null;
 		} elseif ( 'trash_post' === $tool && empty( $result['deleted'] ) ) {

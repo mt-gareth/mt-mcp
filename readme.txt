@@ -4,7 +4,7 @@ Tags: mcp, ai, oauth, cursor, claude, acf, rest-api
 Requires at least: 6.1
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.18
+Stable tag: 1.3.19
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,6 +47,12 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 
 == Changelog ==
 
+= 1.3.19 =
+* New update_acf_layout — surgically get/update/insert/delete/move one ACF flexible layout without resending siblings
+* New list_acf_layouts + get_post field/acf_layout_index helpers for orientation
+* Recipe: Edit one ACF flexible layout safely; skill generator prefers update_acf_layout over full-field rewrite
+* Nested flexible path ops deferred (Nice backlog)
+
 = 1.3.18 =
 * Fix media_alt_report (was listed but not dispatched — “Unknown tool”)
 * Fix list_media url:null; CPT/root URL → post id resolution; check_links relative URLs + 403≠broken
@@ -80,6 +86,9 @@ Not a goal. This plugin targets ACF + classic editor client sites.
 * High-risk second lock; menu:// and media://missing-alt resources; Doctor auth/WAF probe
 
 == Upgrade Notice ==
+
+= 1.3.19 =
+Surgical ACF flexible edits via update_acf_layout / list_acf_layouts. Prefer these over full-field update_post rewrites.
 
 = 1.3.18 =
 Bugfixes: media_alt_report dispatch, list_media URLs, CPT URL lookup, link/sitemap/health polish.

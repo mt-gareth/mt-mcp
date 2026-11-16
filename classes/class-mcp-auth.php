@@ -137,6 +137,7 @@ class McpAuth {
 		$map = array(
 			'create_post'              => 'edit_posts',
 			'update_post'              => 'edit_posts',
+			'update_acf_layout'        => 'edit_posts',
 			'trash_post'               => 'delete_posts',
 			'bulk_update_yoast'        => 'edit_posts',
 			'bulk_update_seo'          => 'edit_posts',

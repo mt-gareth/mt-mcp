@@ -4,7 +4,7 @@ Standalone WordPress MCP server for Motion Tactic client work. Auth is **OAuth 2
 
 **Goal:** inventory, build, and update a typical MT site (ACF + classic, Yoast, media, menus, redirects, staging→prod) from Cursor/Claude — with dry-run, audit, undo, and user-scoped grants.
 
-**Current:** `1.3.18` (feature-locked) · ~37 Recipes · MCP prompts include `client_rollout`, `session_plan`, `seo_pass`, `content_inventory`, `acf_gap_check`, `launch_prep`.
+**Current:** `1.3.19` (feature-locked) · ~38 Recipes · MCP prompts include `client_rollout`, `session_plan`, `seo_pass`, `content_inventory`, `acf_gap_check`, `launch_prep`.
 
 ---
 
@@ -17,7 +17,7 @@ Standalone WordPress MCP server for Motion Tactic client work. Auth is **OAuth 2
 | Post types / CPT inventory | ✓ | — | `list_post_types`, `describe_post_type`, `inventory_post_types`, `permalink_clash_report` |
 | Posts / pages / CPTs | ✓ | ✓ | create / update / trash / schedule / duplicate / find_replace / bulk_update; ACF + SEO buckets |
 | ACF schema | ✓ | — | field groups, flexible layouts, options pages list |
-| ACF values | ✓ | ✓ | posts + options pages; `acf_media_audit` |
+| ACF values | ✓ | ✓ | posts + options pages; `acf_media_audit`; surgical `update_acf_layout` / `list_acf_layouts` (top-level flex) |
 | Taxonomies / terms | ✓ | ✓ | CRUD + dry_run |
 | Media | ✓ | ✓ | upload / alt bulk / SHA reuse / replace-keep-ID / SVG sanitize / unused report |
 | Menus | ✓ | ✓ | CRUD + items; `menu://{location}` |
@@ -37,7 +37,7 @@ Standalone WordPress MCP server for Motion Tactic client work. Auth is **OAuth 2
 1. **Connect** — `connection_doctor` → green discovery / WAF / gates  
 2. **Roll out** — `client_rollout` (brief, AGENTS.md, skill, gates)  
 3. **Onboard** — schemas → `generate_cursor_skill`  
-4. **Build / fix ACF** — gap check → draft fills → dry_run → apply  
+4. **Build / fix ACF** — gap check → `list_acf_layouts` / `update_acf_layout` (or draft fills) → dry_run → apply  
 5. **SEO / media / launch** — audits → soft-404 → redirects → menus  
 6. **Staging → prod** — export → conflict check → import dry_run → apply  
 7. **Recover** — pause writes · undo · Changes UI · update zip rollback  
@@ -63,6 +63,7 @@ Only **open** work. Pull from Maybe only when a real client job needs it.
 | HITL approval queue beyond Force draft | Force draft + needs-review inbox is enough for now |
 | Write-and-confirm outcome enum on every mutation | Partial via verification; formalize if agents miss silent drops |
 | Alert emails (no payload) on denials/errors | Ops polish |
+| Nested ACF flexible path ops (`path: [{index},{field,index}…]`) | Top-level `update_acf_layout` ships; nested section_rows/row_components when agents hit TaskRay-shaped trees often |
 | Tool profiles / discover-run gateway | Only if `tools/list` overwhelms Cursor |
 | Long-running task/poll | For huge sitemap/SEO/alt sweeps |
 | Step-up OAuth scopes (read → re-consent write) | Force draft + grant scopes cover MT admins |
@@ -125,6 +126,7 @@ Only **open** work. Pull from Maybe only when a real client job needs it.
 | **1.3.16** | Plugin icons (`assets/`); Tested up to WP 7.1 |
 | **1.3.17** | Per-grant labels + revoke (`grant_id`); same WP user + app no longer share one label |
 | **1.3.18** | media_alt_report dispatch; list_media URLs; CPT URL resolve; links/sitemap/health polish |
+| **1.3.19** | `update_acf_layout` + `list_acf_layouts`; get_post `acf_layout_index`; recipe for one-layout edits; nested flex path → Nice |
 
 ---
 

@@ -870,7 +870,7 @@ TXT;
 			),
 			array(
 				'name'        => 'get_post',
-				'description' => 'Full post detail: core, taxonomies, featured image, Yoast, ACF. Identify by id or url. Use include, only_acf_fields, exclude_acf_fields, max_content_chars to control payload size.',
+				'description' => 'Full post detail: core, taxonomies, featured image, Yoast, ACF. Identify by id or url. Use include, only_acf_fields, exclude_acf_fields, max_content_chars to control payload size. For one flexible layout: field + acf_layout_index (prefer list_acf_layouts / update_acf_layout for edits).',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -879,9 +879,24 @@ TXT;
 						'include'            => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'description' => 'Subset of: core, taxonomies, featured_image, yoast, acf, raw_meta.' ),
 						'only_acf_fields'    => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 						'exclude_acf_fields' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+						'field'              => array( 'type' => 'string', 'description' => 'Flexible field name when using acf_layout_index.' ),
+						'acf_layout_index'   => array( 'type' => 'integer', 'description' => 'Return only this layout index from field / only_acf_fields[0].' ),
 						'max_content_chars'  => array( 'type' => 'integer' ),
 						'include_raw_meta'   => array( 'type' => 'boolean' ),
 					),
+				),
+			),
+			array(
+				'name'        => 'list_acf_layouts',
+				'description' => 'List flexible-content layouts for a field (index, acf_fc_layout, summary) without nested row payloads. Use before update_acf_layout.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'    => array( 'type' => 'integer' ),
+						'url'   => array( 'type' => 'string' ),
+						'field' => array( 'type' => 'string', 'description' => 'Flexible content field name (e.g. page_sections).' ),
+					),
+					'required'   => array( 'field' ),
 				),
 			),
 			array(
@@ -1180,7 +1195,7 @@ TXT;
 			),
 			array(
 				'name'        => 'update_post',
-				'description' => 'Update a post by id/url. Buckets optional: core, taxonomies, yoast, acf, meta, featured_image_id. Supports dry_run; returns diff of changed fields.',
+				'description' => 'Update a post by id/url. Buckets optional: core, taxonomies, yoast, acf, meta, featured_image_id. Supports dry_run; returns diff of changed fields. For one flexible layout row prefer update_acf_layout (avoids sibling overwrite).',
 				'inputSchema' => array(
 					'type'       => 'object',
 					'properties' => array(
@@ -1194,6 +1209,26 @@ TXT;
 						'featured_image_id' => array( 'type' => 'integer' ),
 						'dry_run'           => array( 'type' => 'boolean' ),
 					),
+				),
+			),
+			array(
+				'name'        => 'update_acf_layout',
+				'description' => 'Surgically get/update/insert/delete/move ONE ACF flexible-content layout without resending siblings. Top-level field only (nested path deferred). Prefer dry_run:true first; use expected_count + expected_layout guards. op=get without index lists layouts.',
+				'inputSchema' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id'               => array( 'type' => 'integer' ),
+						'url'              => array( 'type' => 'string' ),
+						'field'            => array( 'type' => 'string', 'description' => 'Flexible content field name (e.g. page_sections).' ),
+						'op'               => array( 'type' => 'string', 'description' => 'get | update | insert | delete | move' ),
+						'index'            => array( 'type' => 'integer', 'description' => '0-based layout index. For insert, index===count appends.' ),
+						'to_index'         => array( 'type' => 'integer', 'description' => 'Destination index for op=move.' ),
+						'value'            => array( 'type' => 'object', 'description' => 'Single layout object including acf_fc_layout (update/insert).' ),
+						'expected_layout'  => array( 'type' => 'string', 'description' => 'Refuse update/delete/move unless current row acf_fc_layout matches.' ),
+						'expected_count'   => array( 'type' => 'integer', 'description' => 'Refuse if current layout count differs (stale read).' ),
+						'dry_run'          => array( 'type' => 'boolean', 'description' => 'Opt-in like other writes. Prefer true before apply.' ),
+					),
+					'required'   => array( 'field', 'op' ),
 				),
 			),
 			array(
@@ -1771,7 +1806,10 @@ TXT;
 			return $this->tool_error( "Tool group for \"$name\" is disabled in Settings > MT MCP." );
 		}
 
-		if ( McpSupport::is_write_tool( $name ) ) {
+		// update_acf_layout op=get is a read sub-op (listing / fetching one layout).
+		$acf_layout_read = ( 'update_acf_layout' === $name && isset( $args['op'] ) && 'get' === sanitize_key( (string) $args['op'] ) );
+
+		if ( McpSupport::is_write_tool( $name ) && ! $acf_layout_read ) {
 			if ( ! get_option( self::OPTION_ALLOW_WRITE ) ) {
 				return $this->tool_error( 'Writes are disabled. Enable "Allow MCP writes" in Settings > MT MCP.' );
 			}
@@ -1889,8 +1927,10 @@ TXT;
 			'list_posts'            => 'list_posts',
 			'search_posts'          => 'search_posts',
 			'get_post'              => 'get_post',
+			'list_acf_layouts'      => 'list_acf_layouts',
 			'create_post'           => 'create_post',
 			'update_post'           => 'update_post',
+			'update_acf_layout'     => 'update_acf_layout',
 			'trash_post'            => 'trash_post',
 			'list_revisions'        => 'list_revisions',
 			'get_revision'          => 'get_revision',

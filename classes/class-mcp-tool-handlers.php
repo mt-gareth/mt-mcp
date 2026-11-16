@@ -475,6 +475,41 @@ class McpToolHandlers {
 			if ( is_array( $acf ) && ! empty( $args['only_acf_fields'] ) && is_array( $args['only_acf_fields'] ) ) {
 				$acf = array_intersect_key( $acf, array_flip( $args['only_acf_fields'] ) );
 			}
+			// Surgical flexible read: return one layout instead of the full field array.
+			if ( is_array( $acf ) && isset( $args['acf_layout_index'] ) ) {
+				$field_name = isset( $args['field'] ) ? sanitize_key( (string) $args['field'] ) : '';
+				if ( '' === $field_name && ! empty( $args['only_acf_fields'] ) && is_array( $args['only_acf_fields'] ) && 1 === count( $args['only_acf_fields'] ) ) {
+					$field_name = sanitize_key( (string) reset( $args['only_acf_fields'] ) );
+				}
+				if ( '' === $field_name ) {
+					throw new \Exception( 'acf_layout_index requires field (or a single only_acf_fields entry).' );
+				}
+				if ( ! isset( $acf[ $field_name ] ) || ! is_array( $acf[ $field_name ] ) ) {
+					throw new \Exception( sprintf( 'ACF field "%s" missing or not an array on this post.', $field_name ) );
+				}
+				$layout_i = (int) $args['acf_layout_index'];
+				$rows     = array_values( $acf[ $field_name ] );
+				if ( $layout_i < 0 || $layout_i >= count( $rows ) ) {
+					throw new \Exception( sprintf( 'acf_layout_index %d out of range (0..%d).', $layout_i, max( 0, count( $rows ) - 1 ) ) );
+				}
+				$acf = array(
+					$field_name => array(
+						'index'         => $layout_i,
+						'count'         => count( $rows ),
+						'layout'        => $rows[ $layout_i ],
+						'siblings'      => array_map(
+							function ( $row, $i ) {
+								return array(
+									'index'         => (int) $i,
+									'acf_fc_layout' => isset( $row['acf_fc_layout'] ) ? (string) $row['acf_fc_layout'] : '',
+								);
+							},
+							$rows,
+							array_keys( $rows )
+						),
+					),
+				);
+			}
 			$data['acf'] = $acf;
 		}
 
@@ -596,6 +631,473 @@ class McpToolHandlers {
 				'diff'         => McpSupport::diff_values( $before, $after ),
 				'verification' => $verification,
 			)
+		);
+	}
+
+	/**
+	 * List ACF flexible-content layout rows (index + acf_fc_layout + light summary).
+	 * Prefer this over get_post when you only need orientation before update_acf_layout.
+	 *
+	 * @param array $args id|url, field (required).
+	 * @return array
+	 */
+	public function list_acf_layouts( $args ) {
+		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_read_post( $post_id );
+		$field   = isset( $args['field'] ) ? sanitize_key( (string) $args['field'] ) : '';
+		if ( '' === $field ) {
+			throw new \Exception( 'Provide field (flexible content field name, e.g. page_sections).' );
+		}
+		$rows = $this->load_flexible_rows( $post_id, $field );
+		return array(
+			'id'      => $post_id,
+			'field'   => $field,
+			'count'   => count( $rows ),
+			'layouts' => $this->summarize_flexible_rows( $rows ),
+		);
+	}
+
+	/**
+	 * Surgically get / update / insert / delete / move one ACF flexible-content layout.
+	 * Client sends a single layout value for update/insert — siblings are never rewritten from the client.
+	 * Nested flexible paths are not supported in v1 (top-level field only). Prefer dry_run:true first.
+	 *
+	 * @param array $args Tool args.
+	 * @return array
+	 */
+	public function update_acf_layout( $args ) {
+		if ( ! function_exists( 'get_field' ) || ! function_exists( 'update_field' ) ) {
+			throw new \Exception( 'ACF is not active on this site.' );
+		}
+		if ( ! empty( $args['path'] ) ) {
+			throw new \Exception( 'Nested path is not supported yet. Operate on the top-level flexible field only (e.g. page_sections). Nested section_rows / row_components still require a full row update of the parent layout.' );
+		}
+
+		$post_id = McpSupport::resolve_post_id( $args );
+		McpSupport::assert_can_edit_post( $post_id );
+
+		$field = isset( $args['field'] ) ? sanitize_key( (string) $args['field'] ) : '';
+		if ( '' === $field ) {
+			throw new \Exception( 'Provide field (flexible content field name).' );
+		}
+
+		$op = isset( $args['op'] ) ? sanitize_key( (string) $args['op'] ) : '';
+		if ( ! in_array( $op, array( 'get', 'update', 'insert', 'delete', 'move' ), true ) ) {
+			throw new \Exception( 'op must be one of: get, update, insert, delete, move.' );
+		}
+
+		$field_obj       = $this->resolve_flexible_field( $field, $post_id );
+		$allowed_layouts = $this->flexible_layout_names( $field_obj );
+		$rows            = $this->load_flexible_rows( $post_id, $field );
+		$count           = count( $rows );
+
+		if ( isset( $args['expected_count'] ) && '' !== $args['expected_count'] && null !== $args['expected_count'] ) {
+			$expected_count = (int) $args['expected_count'];
+			if ( $expected_count !== $count ) {
+				throw new \Exception(
+					sprintf(
+						'expected_count mismatch: field "%s" has %d layouts, expected %d (stale read?). Re-list with list_acf_layouts / update_acf_layout op=get.',
+						$field,
+						$count,
+						$expected_count
+					)
+				);
+			}
+		}
+
+		// Orientation: list when get has no index.
+		if ( 'get' === $op && ! isset( $args['index'] ) ) {
+			return array(
+				'id'      => $post_id,
+				'field'   => $field,
+				'op'      => 'get',
+				'count'   => $count,
+				'layouts' => $this->summarize_flexible_rows( $rows ),
+				'hint'    => 'Pass index to return one full layout value.',
+			);
+		}
+
+		if ( ! isset( $args['index'] ) ) {
+			throw new \Exception( 'Provide index (0-based layout index).' );
+		}
+		$index = (int) $args['index'];
+
+		if ( 'insert' === $op ) {
+			if ( $index < 0 || $index > $count ) {
+				throw new \Exception( sprintf( 'insert index %d out of range (0..%d appends).', $index, $count ) );
+			}
+		} elseif ( $index < 0 || $index >= $count ) {
+			throw new \Exception( sprintf( 'index %d out of range (0..%d).', $index, max( 0, $count - 1 ) ) );
+		}
+
+		if ( in_array( $op, array( 'update', 'delete', 'move' ), true ) && ! empty( $args['expected_layout'] ) ) {
+			$expected_layout = sanitize_key( (string) $args['expected_layout'] );
+			$current_layout  = isset( $rows[ $index ]['acf_fc_layout'] ) ? (string) $rows[ $index ]['acf_fc_layout'] : '';
+			if ( $expected_layout !== $current_layout ) {
+				throw new \Exception(
+					sprintf(
+						'expected_layout mismatch at index %d: have "%s", expected "%s" (index drift?).',
+						$index,
+						$current_layout,
+						$expected_layout
+					)
+				);
+			}
+		}
+
+		if ( 'get' === $op ) {
+			return array(
+				'id'            => $post_id,
+				'field'         => $field,
+				'op'            => 'get',
+				'index'         => $index,
+				'count'         => $count,
+				'layout'        => $rows[ $index ],
+				'siblings'      => $this->summarize_flexible_rows( $rows ),
+				'allowed_layouts' => $allowed_layouts,
+			);
+		}
+
+		$value = null;
+		if ( in_array( $op, array( 'update', 'insert' ), true ) ) {
+			if ( empty( $args['value'] ) || ! is_array( $args['value'] ) ) {
+				throw new \Exception( 'op=' . $op . ' requires value: { acf_fc_layout, ...subfields }.' );
+			}
+			$value = $args['value'];
+			if ( empty( $value['acf_fc_layout'] ) || ! is_string( $value['acf_fc_layout'] ) ) {
+				throw new \Exception( 'value.acf_fc_layout is required.' );
+			}
+			$layout_name = sanitize_key( $value['acf_fc_layout'] );
+			$value['acf_fc_layout'] = $layout_name;
+			if ( ! empty( $allowed_layouts ) && ! in_array( $layout_name, $allowed_layouts, true ) ) {
+				throw new \Exception(
+					sprintf(
+						'Unknown layout "%s" for field "%s". Allowed: %s',
+						$layout_name,
+						$field,
+						implode( ', ', $allowed_layouts )
+					)
+				);
+			}
+		}
+
+		$to_index = null;
+		if ( 'move' === $op ) {
+			if ( ! isset( $args['to_index'] ) ) {
+				throw new \Exception( 'op=move requires to_index.' );
+			}
+			$to_index = (int) $args['to_index'];
+			if ( $to_index < 0 || $to_index >= $count ) {
+				throw new \Exception( sprintf( 'to_index %d out of range (0..%d).', $to_index, max( 0, $count - 1 ) ) );
+			}
+		}
+
+		$before_rows = $rows;
+		$new_rows    = $rows; // copy (PHP arrays are copy-on-write; we reindex explicitly).
+		$affected    = array();
+
+		switch ( $op ) {
+			case 'update':
+				$new_rows[ $index ] = $value;
+				$affected           = array( $index );
+				break;
+			case 'insert':
+				array_splice( $new_rows, $index, 0, array( $value ) );
+				$new_rows = array_values( $new_rows );
+				for ( $i = $index; $i < count( $new_rows ); $i++ ) {
+					$affected[] = $i;
+				}
+				break;
+			case 'delete':
+				array_splice( $new_rows, $index, 1 );
+				$new_rows = array_values( $new_rows );
+				for ( $i = $index; $i <= count( $before_rows ); $i++ ) {
+					$affected[] = $i;
+				}
+				break;
+			case 'move':
+				if ( $to_index === $index ) {
+					$affected = array( $index );
+					break;
+				}
+				$row = $new_rows[ $index ];
+				array_splice( $new_rows, $index, 1 );
+				array_splice( $new_rows, $to_index, 0, array( $row ) );
+				$new_rows = array_values( $new_rows );
+				$from     = min( $index, $to_index );
+				$to       = max( $index, $to_index );
+				for ( $i = $from; $i <= $to; $i++ ) {
+					$affected[] = $i;
+				}
+				break;
+		}
+
+		$before_slice = $this->slice_flexible_rows( $before_rows, $affected );
+		$after_slice  = $this->slice_flexible_rows( $new_rows, $affected );
+		$diff         = McpSupport::diff_values( $before_slice, $after_slice );
+		$dry_run      = ! empty( $args['dry_run'] );
+
+		$planned = array(
+			'op'        => $op,
+			'field'     => $field,
+			'index'     => $index,
+			'to_index'  => $to_index,
+			'count_before' => $count,
+			'count_after'  => count( $new_rows ),
+			'before_layouts' => $this->summarize_flexible_rows( $before_rows ),
+			'after_layouts'  => $this->summarize_flexible_rows( $new_rows ),
+			'affected_indexes' => array_values( array_unique( $affected ) ),
+		);
+
+		if ( $dry_run ) {
+			return array(
+				'dry_run' => true,
+				'id'      => $post_id,
+				'field'   => $field,
+				'planned' => $planned,
+				'diff'    => $diff,
+				'hint'    => 'Re-call with dry_run:false (or omit dry_run) to apply. Prefer expected_count + expected_layout guards.',
+			);
+		}
+
+		// ACF update_field() often returns false even when the write succeeds (unchanged
+		// comparison / format quirks). Always re-read and verify instead of trusting the bool.
+		update_field( $field, $new_rows, $post_id );
+
+		$verified_rows = $this->load_flexible_rows( $post_id, $field );
+		$verification  = $this->verify_flexible_op( $op, $index, $to_index, $value, $before_rows, $new_rows, $verified_rows );
+
+		return array(
+			'id'            => $post_id,
+			'field'         => $field,
+			'op'            => $op,
+			'index'         => $index,
+			'to_index'      => $to_index,
+			'count_before'  => $count,
+			'count_after'   => count( $verified_rows ),
+			'layouts'       => $this->summarize_flexible_rows( $verified_rows ),
+			'diff'          => McpSupport::diff_values(
+				$this->slice_flexible_rows( $before_rows, $affected ),
+				$this->slice_flexible_rows( $verified_rows, $affected )
+			),
+			'verification'  => $verification,
+			'permalink'     => get_permalink( $post_id ),
+		);
+	}
+
+	/**
+	 * @param int    $post_id Post ID.
+	 * @param string $field   Field name.
+	 * @return array<int,array>
+	 */
+	private function load_flexible_rows( $post_id, $field ) {
+		$value = get_field( $field, $post_id );
+		if ( false === $value || null === $value || '' === $value ) {
+			return array();
+		}
+		if ( ! is_array( $value ) ) {
+			throw new \Exception( sprintf( 'Field "%s" is not a flexible content array.', $field ) );
+		}
+		// Flexible rows are a list of associative arrays with acf_fc_layout.
+		if ( $value && array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) {
+			// Associative (maybe empty object / wrong type).
+			$looks_like_row = isset( $value['acf_fc_layout'] );
+			if ( $looks_like_row ) {
+				throw new \Exception( sprintf( 'Field "%s" does not look like flexible_content (got a single layout object).', $field ) );
+			}
+		}
+		$out = array();
+		foreach ( $value as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$out[] = $row;
+		}
+		return $out;
+	}
+
+	/**
+	 * @param string $field   Field name/key.
+	 * @param int    $post_id Post ID for context.
+	 * @return array ACF field array.
+	 */
+	private function resolve_flexible_field( $field, $post_id ) {
+		$obj = null;
+		if ( function_exists( 'acf_get_field' ) ) {
+			$obj = acf_get_field( $field );
+		}
+		if ( ( ! is_array( $obj ) || empty( $obj ) ) && function_exists( 'get_field_object' ) ) {
+			$obj = get_field_object( $field, $post_id, false, false );
+		}
+		if ( ! is_array( $obj ) || empty( $obj['type'] ) ) {
+			throw new \Exception( sprintf( 'Unknown ACF field "%s".', $field ) );
+		}
+		if ( 'flexible_content' !== $obj['type'] ) {
+			throw new \Exception( sprintf( 'Field "%s" is type "%s", not flexible_content.', $field, $obj['type'] ) );
+		}
+		return $obj;
+	}
+
+	/**
+	 * @param array $field_obj ACF field.
+	 * @return string[]
+	 */
+	private function flexible_layout_names( $field_obj ) {
+		$names = array();
+		if ( empty( $field_obj['layouts'] ) || ! is_array( $field_obj['layouts'] ) ) {
+			return $names;
+		}
+		foreach ( $field_obj['layouts'] as $layout ) {
+			if ( ! empty( $layout['name'] ) ) {
+				$names[] = (string) $layout['name'];
+			}
+		}
+		return array_values( array_unique( $names ) );
+	}
+
+	/**
+	 * @param array<int,array> $rows Flexible rows.
+	 * @return array<int,array{index:int,acf_fc_layout:string,subfield_keys:string[],summary:string}>
+	 */
+	private function summarize_flexible_rows( $rows ) {
+		$out = array();
+		foreach ( $rows as $i => $row ) {
+			$layout = isset( $row['acf_fc_layout'] ) ? (string) $row['acf_fc_layout'] : '';
+			$keys   = array();
+			foreach ( array_keys( $row ) as $k ) {
+				if ( 'acf_fc_layout' === $k ) {
+					continue;
+				}
+				$keys[] = (string) $k;
+			}
+			$summary = $layout;
+			foreach ( array( 'heading', 'title', 'section_title', 'label', 'name' ) as $hint_key ) {
+				if ( ! empty( $row[ $hint_key ] ) && is_scalar( $row[ $hint_key ] ) ) {
+					$text = wp_strip_all_tags( (string) $row[ $hint_key ] );
+					if ( '' !== $text ) {
+						$summary = $layout . ': ' . ( strlen( $text ) > 80 ? substr( $text, 0, 80 ) . '…' : $text );
+						break;
+					}
+				}
+			}
+			$out[] = array(
+				'index'          => (int) $i,
+				'acf_fc_layout'  => $layout,
+				'subfield_keys'  => $keys,
+				'summary'        => $summary,
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * @param array $rows     Flexible rows.
+	 * @param array $indexes  Indexes to include (may be beyond bounds → null).
+	 * @return array<string,mixed>
+	 */
+	private function slice_flexible_rows( $rows, $indexes ) {
+		$slice = array();
+		foreach ( array_values( array_unique( $indexes ) ) as $i ) {
+			$key           = (string) (int) $i;
+			$slice[ $key ] = array_key_exists( (int) $i, $rows ) ? $rows[ (int) $i ] : null;
+		}
+		return $slice;
+	}
+
+	/**
+	 * @param string $op Op name.
+	 * @param int    $index Index.
+	 * @param int|null $to_index Move target.
+	 * @param array|null $value Intended layout for update/insert.
+	 * @param array  $before_rows Pre-write rows.
+	 * @param array  $planned_rows In-memory planned rows.
+	 * @param array  $actual_rows Re-read rows.
+	 * @return array{status:string,checks:array}
+	 */
+	private function verify_flexible_op( $op, $index, $to_index, $value, $before_rows, $planned_rows, $actual_rows ) {
+		$checks = array();
+		$status = 'applied';
+
+		$count_ok = count( $planned_rows ) === count( $actual_rows );
+		$checks[] = array(
+			'check'  => 'count',
+			'status' => $count_ok ? 'applied' : 'silent_modify',
+			'intended' => count( $planned_rows ),
+			'actual'   => count( $actual_rows ),
+		);
+		if ( ! $count_ok ) {
+			$status = 'silent_modify';
+		}
+
+		$order_intended = array_map(
+			function ( $row ) {
+				return isset( $row['acf_fc_layout'] ) ? (string) $row['acf_fc_layout'] : '';
+			},
+			$planned_rows
+		);
+		$order_actual = array_map(
+			function ( $row ) {
+				return isset( $row['acf_fc_layout'] ) ? (string) $row['acf_fc_layout'] : '';
+			},
+			$actual_rows
+		);
+		$order_ok = $order_intended === $order_actual;
+		$checks[] = array(
+			'check'    => 'layout_order',
+			'status'   => $order_ok ? 'applied' : 'silent_modify',
+			'intended' => $order_intended,
+			'actual'   => $order_actual,
+		);
+		if ( ! $order_ok ) {
+			$status = 'silent_modify';
+		}
+
+		if ( in_array( $op, array( 'update', 'insert' ), true ) && is_array( $value ) ) {
+			$target_i = 'insert' === $op ? $index : $index;
+			$actual   = isset( $actual_rows[ $target_i ] ) ? $actual_rows[ $target_i ] : null;
+			$norm_i   = $this->normalize_for_verify( $value );
+			$norm_a   = $this->normalize_for_verify( $actual );
+			$field_status = ( null === $actual ) ? 'silent_drop' : ( ( $norm_i === $norm_a ) ? 'applied' : 'silent_modify' );
+			$checks[] = array(
+				'check'    => 'target_layout',
+				'index'    => $target_i,
+				'status'   => $field_status,
+				'intended' => $value,
+				'actual'   => $actual,
+			);
+			if ( 'applied' !== $field_status && 'silent_drop' !== $status ) {
+				$status = $field_status;
+			}
+			if ( 'silent_drop' === $field_status ) {
+				$status = 'silent_drop';
+			}
+		}
+
+		// Sibling integrity: for update, every index except target should match before.
+		if ( 'update' === $op ) {
+			$sibling_ok = true;
+			foreach ( $before_rows as $i => $row ) {
+				if ( (int) $i === (int) $index ) {
+					continue;
+				}
+				$a = isset( $actual_rows[ $i ] ) ? $actual_rows[ $i ] : null;
+				if ( $this->normalize_for_verify( $row ) !== $this->normalize_for_verify( $a ) ) {
+					$sibling_ok = false;
+					break;
+				}
+			}
+			$checks[] = array(
+				'check'  => 'siblings_unchanged',
+				'status' => $sibling_ok ? 'applied' : 'silent_modify',
+			);
+			if ( ! $sibling_ok && 'silent_drop' !== $status ) {
+				$status = 'silent_modify';
+			}
+		}
+
+		return array(
+			'status' => $status,
+			'checks' => $checks,
 		);
 	}
 
@@ -3011,7 +3513,7 @@ description: How to work on {$ctx['site']['name']} via mt-mcp. Use when editing 
 ## Agent workflow
 1. Call `get_site_context` at the start of every session and confirm environment.
 2. Prefer `dry_run: true` on write tools before applying changes.
-3. For ACF flexible content: call `get_acf_schema` / `get_post`, then mirror shapes exactly on `update_post`.
+3. For ACF flexible content: `list_acf_layouts` → `update_acf_layout` (get one row / patch one row). Prefer that over rewriting the whole field via `update_post`. Use `get_acf_schema` for layout shapes. Nested flexible paths are not supported yet — update the parent layout row.
 4. For SEO bulk work: `seo_audit` → draft fixes → `bulk_update_yoast` with dry_run → apply.
 5. Staging → production page moves: `export_post` on source (optionally `embed_media: true`), then `import_post` on target with dry_run first.
 6. After risky edits: `list_revisions` / `restore_revision` if needed.

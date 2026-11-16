@@ -96,6 +96,17 @@ class McpRecipes {
 				'prompt'     => "Fill empty ACF fields on post_type=\"[CPT]\" for up to 10 incomplete posts.\n\n1. Run the ACF gap check first (schema + empty fields).\n2. For each post, draft proposed values from existing title/content/related fields — show me old → new before saving.\n3. update_post with dry_run:true for the first post; show verification.\n4. After I approve, apply with update_post (keep status draft if force_draft is on; do not publish).\n5. Prefer operation_id on writes. Stop after 10 posts or when I say stop.\n\nNever edit siteurl/options/MCP settings. Respect Site Brief.",
 			),
 			array(
+				'id'         => 'acf-edit-one-layout',
+				'title'      => 'Edit one ACF flexible layout safely',
+				'summary'    => 'List layouts → get one row → dry_run update_acf_layout → apply. Never resend sibling layouts.',
+				'category'   => 'acf',
+				'difficulty' => 'intermediate',
+				'minutes'    => 10,
+				'writes'     => true,
+				'tags'       => array( 'acf', 'update_acf_layout', 'list_acf_layouts', 'dry-run' ),
+				'prompt'     => "Edit one ACF flexible-content layout on: [URL or ID]\nField: [e.g. page_sections]\nChange: [describe the edit]\n\n1. list_acf_layouts (or update_acf_layout op=get without index) — note count + indexes + acf_fc_layout.\n2. update_acf_layout op=get with index — pull only that layout value.\n3. Draft the new value (keep acf_fc_layout). Show me old → new for that row only.\n4. update_acf_layout op=update with dry_run:true, expected_count, expected_layout — show path-scoped diff + verification plan.\n5. After I approve, apply with dry_run:false (same guards). Prefer operation_id.\n\nDo NOT rewrite the whole flexible field via update_post. Nested flexible paths are not supported — if the change is inside section_rows/row_components, update the parent layout row via update_acf_layout. Respect Site Brief.",
+			),
+			array(
 				'id'         => 'duplicate-as-draft',
 				'title'      => 'Clone a live page as draft',
 				'summary'    => 'Duplicate a published page/CPT (core + tax + ACF + featured) so edits happen off live.',
